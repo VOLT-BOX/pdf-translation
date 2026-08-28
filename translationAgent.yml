@@ -1,0 +1,1643 @@
+app:
+  description: DE<->IT 技术文档翻译：docx 经 skill_agent 拆分/回填保留排版与图片，术语经 MinIO 读取 + code
+    节点精确匹配强制约束，敏感度分级(本地/云端)模型路由。
+  icon: 🌐
+  icon_background: '#E0F2FE'
+  icon_type: emoji
+  mode: workflow
+  name: Rotech - Translation Agent
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: aias00/minio:0.0.3@fca0552e7b28a2ddba431e1becf5d0d47ceeca577d238657db07dd9147817b59
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/ollama:1.0.0@ae50a2db261bffa7289677f2b0a60e60762ceb187b602113b72425ccbe772dc3
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/openai:1.0.0@c645d52efece517b10435f28da529156a86050dfa28fc4fde8089c038eee7f5a
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: lfenghx/skill_agent:0.0.3@faa24604d1d36cbc6f60dec81eda58564cf79d86dae1472097636ae4b9f017fb
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .pdf
+      - .docx
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: true
+      fileUploadConfig:
+        audio_file_size_limit: 200
+        batch_count_limit: 300
+        file_size_limit: 300
+        image_file_batch_limit: 10
+        image_file_size_limit: 20
+        single_chunk_attachment_limit: 50
+        video_file_size_limit: 1000
+        workflow_file_upload_limit: 300
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: sensitivity_route-false-llm_api-target
+      source: sensitivity_route
+      sourceHandle: 'false'
+      target: llm_api
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: code
+      id: 1782784607970-source-1782788684065-target
+      source: '1782784607970'
+      sourceHandle: source
+      target: '1782788684065'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: tool
+      id: start-source-1783045078386-target
+      source: start
+      sourceHandle: source
+      target: '1783045078386'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: llm_api-source-merge-target
+      source: llm_api
+      sourceHandle: source
+      target: merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: end
+      id: 1783045208480-source-end-target
+      source: '1783045208480'
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: document-extractor
+      id: 1783045078386-source-1783405753304-target
+      source: '1783045078386'
+      sourceHandle: source
+      target: '1783405753304'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: tool
+      id: 1783405753304-source-1782784607970-target
+      source: '1783405753304'
+      sourceHandle: source
+      target: '1782784607970'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: tool
+        targetType: tool
+      id: 1783565746655-source-1783045208480-target
+      source: '1783565746655'
+      sourceHandle: source
+      target: '1783045208480'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: code
+      id: 1782788684065-source-split_batches-target
+      source: '1782788684065'
+      sourceHandle: source
+      target: split_batches
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: split_batches-source-sensitivity_route-target
+      source: split_batches
+      sourceHandle: source
+      target: sensitivity_route
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: iteration
+      id: sensitivity_route-sensitive-iter_local-target
+      source: sensitivity_route
+      sourceHandle: sensitive
+      target: iter_local
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: iter_local-source-reassemble_local-target
+      source: iter_local
+      sourceHandle: source
+      target: reassemble_local
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: variable-aggregator
+      id: reassemble_local-source-merge-target
+      source: reassemble_local
+      sourceHandle: source
+      target: merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: variable-aggregator
+        targetType: code
+      id: merge-source-sanitize_merge-target
+      source: merge
+      sourceHandle: source
+      target: sanitize_merge
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: tool
+      id: sanitize_merge-source-1783565746655-target
+      source: sanitize_merge
+      sourceHandle: source
+      target: '1783565746655'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        iteration_id: iter_local
+        sourceType: iteration-start
+        targetType: llm
+      id: iter_local_start-source-llm_local_batch-target
+      source: iter_local_start
+      sourceHandle: source
+      target: llm_local_batch
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables:
+        - allowed_file_extensions:
+          - .pdf
+          - .docx
+          allowed_file_types:
+          - document
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          label: 文档(PDF/Word)
+          options: []
+          required: true
+          type: file
+          variable: doc_file
+        - default: de2it
+          label: 翻译方向
+          max_length: 48
+          options:
+          - de2it
+          - it2de
+          required: true
+          type: select
+          variable: direction
+        - default: normal
+          label: 敏感度
+          max_length: 48
+          options:
+          - sensitive
+          - normal
+          required: true
+          type: select
+          variable: sensitivity
+      height: 160
+      id: start
+      position:
+        x: 0
+        y: 81
+      positionAbsolute:
+        x: 0
+        y: 81
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: please input your question
+            ja_JP: クエリ文字列は、Skill_Agent に対して実行するタスクを指定する必要があります。
+            pt_BR: please input your question
+            zh_Hans: 请输入你想问的问题
+          label:
+            en_US: Query string
+            ja_JP: クエリ文字列
+            pt_BR: Query string
+            zh_Hans: 查询语句
+          llm_description: please input your question
+          max: null
+          min: null
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Upload file(s) for the agent to process.
+            ja_JP: エージェントが処理するファイルをアップロードします
+            pt_BR: Upload file(s) for the agent to process.
+            zh_Hans: 上传文件，供 Agent 按技能说明书处理
+          label:
+            en_US: Files
+            ja_JP: ファイル
+            pt_BR: Files
+            zh_Hans: 上传文件
+          llm_description: Upload file(s) for the agent to process.
+          max: null
+          min: null
+          name: files
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: files
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Select an LLM to run this tool.
+            ja_JP: このツールを実行する LLM を選択します
+            pt_BR: Select an LLM to run this tool.
+            zh_Hans: 选择用于运行本工具的大模型
+          label:
+            en_US: Model
+            ja_JP: モデル
+            pt_BR: Model
+            zh_Hans: 大模型
+          llm_description: Select an LLM to run this tool.
+          max: null
+          min: null
+          name: model
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: llm
+          template: null
+          type: model-selector
+        - auto_generate: null
+          default: 15
+          form: form
+          human_description:
+            en_US: Max reasoning/tool steps inside one call.
+            ja_JP: 1回の呼び出し内での最大ステップ数
+            pt_BR: Max reasoning/tool steps inside one call.
+            zh_Hans: 单次调用内部最多执行多少轮“思考/调用技能”
+          label:
+            en_US: Max steps
+            ja_JP: 最大ステップ
+            pt_BR: Max steps
+            zh_Hans: 执行轮数
+          llm_description: Max reasoning/tool steps inside one call.
+          max: null
+          min: null
+          name: max_steps
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: 12
+          form: form
+          human_description:
+            en_US: How many recent turns to keep during the run.
+            ja_JP: 実行中に保持する直近ターン数
+            pt_BR: How many recent turns to keep during the run.
+            zh_Hans: 单次调用内部保留最近多少轮上下文
+          label:
+            en_US: Memory turns
+            ja_JP: メモリターン
+            pt_BR: Memory turns
+            zh_Hans: 单轮窗口
+          llm_description: How many recent turns to keep during the run.
+          max: null
+          min: null
+          name: memory_turns
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: 3
+          form: form
+          human_description:
+            en_US: How many previous runs to inject as raw transcript.
+            ja_JP: 以前の実行から挿入する原文のターン数
+            pt_BR: How many previous runs to inject as raw transcript.
+            zh_Hans: 跨回合注入最近多少轮原文对话（0 表示不注入）
+          label:
+            en_US: History turns
+            ja_JP: 履歴ターン
+            pt_BR: History turns
+            zh_Hans: 记忆窗口
+          llm_description: Inject previous turns as raw transcript for continuity.
+          max: null
+          min: null
+          name: history_turns
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        params:
+          files: ''
+          history_turns: ''
+          max_steps: ''
+          memory_turns: ''
+          model: ''
+          query: ''
+        plugin_id: lfenghx/skill_agent
+        plugin_unique_identifier: lfenghx/skill_agent:0.0.3@faa24604d1d36cbc6f60dec81eda58564cf79d86dae1472097636ae4b9f017fb
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=526cbb9c-ffec-4d93-812a-6b4f81c917b9&filename=93e635e707d0f9631baf46e983129f60beaf841f07fe3fdea136ba8dd553b645.svg
+        provider_id: lfenghx/skill_agent/skill_agent
+        provider_name: lfenghx/skill_agent/skill_agent
+        provider_type: builtin
+        selected: false
+        title: 文档拆分
+        tool_configurations:
+          history_turns:
+            type: constant
+            value: 0
+          max_steps:
+            type: constant
+            value: 15
+          memory_turns:
+            type: constant
+            value: 12
+          model:
+            type: constant
+            value:
+              completion_params: {}
+              mode: chat
+              model: qwen3.6:35b-a3b
+              model_type: llm
+              provider: langgenius/ollama/ollama
+        tool_description: 可基于Skill渐进式披露模式执行任务的Agent插件
+        tool_label: Skill_Agent
+        tool_name: skill_agent
+        tool_node_version: '2'
+        tool_parameters:
+          files:
+            type: variable
+            value:
+            - start
+            - doc_file
+          query:
+            type: mixed
+            value: '你在一个自动化工作流中运行,没有用户可以回复你,禁止提出任何问题或请求补充信息。
+
+
+              任务:用 docx-translate-v2 技能,只执行 parse(拆分)这一个操作。
+
+
+              请依次执行,不要询问、不要停下、不要翻译:
+
+              1. 我已上传原始 .docx(见 files 输入)。
+
+              2. 执行:python scripts/parse_docx.py <原始docx路径> -o segments.json
+
+              3. 把生成的 segments.json 作为【文件】输出返回。text 里最多回一句"已解析 N 段",绝不要把 JSON 内容贴进回复。
+
+
+              严禁:翻译;运行或提及 pseudo_translate;询问选项;把 segments.json 的内容当文本粘贴。'
+        type: tool
+      height: 165
+      id: '1783045078386'
+      position:
+        x: 342
+        y: 78
+      positionAbsolute:
+        x: 342
+        y: 78
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: sensitive
+          conditions:
+          - comparison_operator: is
+            id: cond_sensitive
+            value: sensitive
+            varType: string
+            variable_selector:
+            - start
+            - sensitivity
+          id: sensitive
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 敏感度路由
+        type: if-else
+      height: 123
+      id: sensitivity_route
+      position:
+        x: 2052
+        y: 99
+      positionAbsolute:
+        x: 2052
+        y: 99
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: gpt-4.1
+          provider: langgenius/openai/openai
+        prompt_template:
+        - id: sys
+          role: system
+          text: '你是 DE<->IT 专业技术翻译，领域为排水/管道/无开挖修复(Schlauchlining/CIPP)。
+
+            下面用户消息里是一个 JSON，segments 数组中每个对象含 id 和 text。
+
+            请只翻译每个 text 的内容；id 与数组顺序保持不变；JSON 结构保持不变。
+
+            只输出翻译后的 JSON 本身，不要任何解释，不要用代码块或 ``` 包裹。
+
+            {{#1782788684065.prompt_block#}}'
+        - id: usr
+          role: user
+          text: '翻译方向: {{#start.direction#}}
+
+
+            待翻译 JSON:
+
+            {{#1782788684065.segments_clean#}}'
+        selected: false
+        title: 翻译(云端API/非敏感)
+        type: llm
+        vision:
+          enabled: false
+      height: 87
+      id: llm_api
+      position:
+        x: 2637.1428571428573
+        y: 495.8152204241072
+      positionAbsolute:
+        x: 2637.1428571428573
+        y: 495.8152204241072
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        output_type: string
+        selected: false
+        title: 合并译文
+        type: variable-aggregator
+        variables:
+        - - reassemble_local
+          - translations_json
+        - - llm_api
+          - text
+      height: 135
+      id: merge
+      position:
+        x: 3362
+        y: 109
+      positionAbsolute:
+        x: 3362
+        y: 109
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        outputs:
+        - value_selector:
+          - '1783045208480'
+          - files
+          variable: output_file
+        - value_selector:
+          - '1782788684065'
+          - hit_count
+          variable: term_hits
+        selected: false
+        title: 结束
+        type: end
+      height: 114
+      id: end
+      position:
+        x: 4730
+        y: 120
+      positionAbsolute:
+        x: 4730
+        y: 120
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The access key for MinIO authentication.
+            ja_JP: The access key for MinIO authentication.
+            pt_BR: The access key for MinIO authentication.
+            zh_Hans: 用于MinIO身份验证的访问密钥。
+          label:
+            en_US: MinIO Access Key
+            ja_JP: MinIO Access Key
+            pt_BR: MinIO Access Key
+            zh_Hans: MinIO访问密钥
+          llm_description: A tool to read content from a MinIO bucket.
+          max: null
+          min: null
+          name: access_key
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The secret key for MinIO authentication.
+            ja_JP: The secret key for MinIO authentication.
+            pt_BR: The secret key for MinIO authentication.
+            zh_Hans: 用于MinIO身份验证的秘密密钥。
+          label:
+            en_US: MinIO Secret Key
+            ja_JP: MinIO Secret Key
+            pt_BR: MinIO Secret Key
+            zh_Hans: MinIO秘密密钥
+          llm_description: A tool to read content from a MinIO bucket.
+          max: null
+          min: null
+          name: secret_key
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            ja_JP: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            pt_BR: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            zh_Hans: MinIO服务器的端点URL（例如 http://localhost:9000）。
+          label:
+            en_US: MinIO Endpoint URL
+            ja_JP: MinIO Endpoint URL
+            pt_BR: MinIO Endpoint URL
+            zh_Hans: MinIO端点URL
+          llm_description: A tool to read content from a MinIO bucket.
+          max: null
+          min: null
+          name: endpoint
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The name of the MinIO bucket to write to.
+            ja_JP: The name of the MinIO bucket to write to.
+            pt_BR: The name of the MinIO bucket to write to.
+            zh_Hans: 要写入的MinIO存储桶名称。
+          label:
+            en_US: Bucket Name
+            ja_JP: Bucket Name
+            pt_BR: Bucket Name
+            zh_Hans: 存储桶名称
+          llm_description: A tool to read content from a MinIO bucket.
+          max: null
+          min: null
+          name: bucket_name
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The name of the object/file in the MinIO bucket.
+            ja_JP: The name of the object/file in the MinIO bucket.
+            pt_BR: The name of the object/file in the MinIO bucket.
+            zh_Hans: MinIO存储桶中的对象/文件名。
+          label:
+            en_US: Object Name
+            ja_JP: Object Name
+            pt_BR: Object Name
+            zh_Hans: 对象名称
+          llm_description: A tool to read content from a MinIO bucket.
+          max: null
+          min: null
+          name: object_name
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          access_key: ''
+          bucket_name: ''
+          endpoint: ''
+          object_name: ''
+          secret_key: ''
+        plugin_id: aias00/minio
+        plugin_unique_identifier: aias00/minio:0.0.3@fca0552e7b28a2ddba431e1becf5d0d47ceeca577d238657db07dd9147817b59
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=526cbb9c-ffec-4d93-812a-6b4f81c917b9&filename=4cea37eba8c83ef0cff1dd7668ac0be3d1cc121d9a04e52951d2791811efcda6.svg
+        provider_id: aias00/minio/minio
+        provider_name: aias00/minio/minio
+        provider_type: builtin
+        selected: false
+        title: MinIO读取工具
+        tool_configurations:
+          access_key:
+            type: mixed
+            value: admin
+          bucket_name:
+            type: mixed
+            value: difyai
+          endpoint:
+            type: mixed
+            value: http://minio:9000
+          secret_key:
+            type: mixed
+            value: 6YGl55yL54CR5biD5oyC5YmN5bed
+        tool_description: 从MinIO存储桶读取内容的工具。
+        tool_label: MinIO读取工具
+        tool_name: minio_reader
+        tool_node_version: '2'
+        tool_parameters:
+          object_name:
+            type: mixed
+            value: Glossary_DE_IT(Tabelle1).csv
+        type: tool
+      height: 165
+      id: '1782784607970'
+      position:
+        x: 1026
+        y: 78
+      positionAbsolute:
+        x: 1026
+        y: 78
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "import json\nimport re\n\nCASE_SENSITIVE = {\"Stoff\", \"stoff\"} \
+          \ # 大小写区分含义的词\n\ndef _as_text(v):                      # 归一：array[string]\
+          \ / None -> str\n    if isinstance(v, list):\n        return \"\\n\".join(x\
+          \ for x in v if isinstance(x, str))\n    return v or \"\"\n\ndef _parse(csv_text):\n\
+          \    csv_text = csv_text.lstrip(\"\\ufeff\")          # 去 BOM\n    rows\
+          \ = []\n    for line in csv_text.splitlines():            # 兼容 \\r\\n /\
+          \ \\n\n        line = line.strip()\n        if not line or \",\" not in\
+          \ line:\n            continue\n        de, _, it = line.partition(\",\"\
+          )\n        de, it = de.strip(), it.strip()\n        if not de or not it:\n\
+          \            continue\n        if de.lower() == \"de\" and it.lower() ==\
+          \ \"it\":  # 跳过混入的表头行\n            continue\n        rows.append((de, it))\n\
+          \    return rows\n\ndef _index(rows, direction):\n    return {it: de for\
+          \ de, it in rows} if direction == \"it2de\" else {de: it for de, it in rows}\n\
+          \ndef _pattern(terms):\n    if not terms:\n        return None\n    alts\
+          \ = [re.escape(t) for t in sorted(terms, key=len, reverse=True)]\n    return\
+          \ re.compile(r\"(?<!\\w)(?:\" + \"|\".join(alts) + r\")(?!\\w)\", re.UNICODE)\n\
+          \ndef _extract_json(blob):\n    dec = json.JSONDecoder()\n    i, n = 0,\
+          \ len(blob)\n    while i < n:\n        j = blob.find(\"{\")\n        if\
+          \ j < 0:\n            break\n        try:\n            obj, end = dec.raw_decode(blob,\
+          \ j)\n            if isinstance(obj, dict) and \"segments\" in obj:\n  \
+          \              return obj\n            i = end\n        except json.JSONDecodeError:\n\
+          \            i = j + 1\n    return {}\n\ndef main(csv_text: str, segments_json,\
+          \ direction: str) -> dict:\n    csv_text = _as_text(csv_text)          \
+          \       # 新增：归一\n    segments_json = _as_text(segments_json)       # 新增：归一（文档提取器给的是\
+          \ array[string]）\n    rows = _parse(csv_text)\n    index = _index(rows,\
+          \ direction or \"de2it\")\n    obj = _extract_json(segments_json)\n    segs\
+          \ = obj.get(\"segments\", []) if isinstance(obj, dict) else []\n    text\
+          \ = \"\\n\".join(s.get(\"text\", \"\") for s in segs)\n    cs = [t for t\
+          \ in index if t in CASE_SENSITIVE]\n    ci = [t for t in index if t not\
+          \ in CASE_SENSITIVE]\n    hits, seen = [], set()\n    p = _pattern(cs)\n\
+          \    if p:\n        for m in p.finditer(text or \"\"):\n            s =\
+          \ m.group(0)\n            if s in index and s not in seen:\n           \
+          \     seen.add(s); hits.append((s, index[s]))\n    p = _pattern(ci)\n  \
+          \  if p:\n        low = {t.lower(): t for t in ci}\n        for m in re.finditer(p.pattern,\
+          \ text or \"\", re.UNICODE | re.IGNORECASE):\n            c = low.get(m.group(0).lower())\n\
+          \            if c and c not in seen:\n                seen.add(c); hits.append((c,\
+          \ index[c]))\n    if hits:\n        block = (\"[强制术语约束] 以下术语必须严格按指定译法翻译，不得改写或意译，遇到即整体替换：\\\
+          n\"\n                 + \"\\n\".join(f\"- {s} -> {t}\" for s, t in hits))\n\
+          \    else:\n        block = \"\"\n    return {\"prompt_block\": block, \"\
+          hit_count\": len(hits),\n            \"term_count\": len(rows), \"segments_clean\"\
+          : json.dumps({\"segments\": segs}, ensure_ascii=False)}\n"
+        code_language: python3
+        outputs:
+          hit_count:
+            children: null
+            type: number
+          prompt_block:
+            children: null
+            type: string
+          segments_clean:
+            children: null
+            type: string
+          term_count:
+            children: null
+            type: number
+        selected: false
+        title: 术语匹配
+        type: code
+        variables:
+        - value_selector:
+          - '1782784607970'
+          - text
+          variable: csv_text
+        - value_selector:
+          - '1783405753304'
+          - text
+          value_type: array[string]
+          variable: segments_json
+        - value_selector:
+          - start
+          - direction
+          variable: direction
+      height: 51
+      id: '1782788684065'
+      position:
+        x: 1368
+        y: 135
+      positionAbsolute:
+        x: 1368
+        y: 135
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: please input your question
+            ja_JP: クエリ文字列は、Skill_Agent に対して実行するタスクを指定する必要があります。
+            pt_BR: please input your question
+            zh_Hans: 请输入你想问的问题
+          label:
+            en_US: Query string
+            ja_JP: クエリ文字列
+            pt_BR: Query string
+            zh_Hans: 查询语句
+          llm_description: please input your question
+          max: null
+          min: null
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: Upload file(s) for the agent to process.
+            ja_JP: エージェントが処理するファイルをアップロードします
+            pt_BR: Upload file(s) for the agent to process.
+            zh_Hans: 上传文件，供 Agent 按技能说明书处理
+          label:
+            en_US: Files
+            ja_JP: ファイル
+            pt_BR: Files
+            zh_Hans: 上传文件
+          llm_description: Upload file(s) for the agent to process.
+          max: null
+          min: null
+          name: files
+          options: []
+          placeholder: null
+          precision: null
+          required: false
+          scope: null
+          template: null
+          type: files
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: Select an LLM to run this tool.
+            ja_JP: このツールを実行する LLM を選択します
+            pt_BR: Select an LLM to run this tool.
+            zh_Hans: 选择用于运行本工具的大模型
+          label:
+            en_US: Model
+            ja_JP: モデル
+            pt_BR: Model
+            zh_Hans: 大模型
+          llm_description: Select an LLM to run this tool.
+          max: null
+          min: null
+          name: model
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: llm
+          template: null
+          type: model-selector
+        - auto_generate: null
+          default: 15
+          form: form
+          human_description:
+            en_US: Max reasoning/tool steps inside one call.
+            ja_JP: 1回の呼び出し内での最大ステップ数
+            pt_BR: Max reasoning/tool steps inside one call.
+            zh_Hans: 单次调用内部最多执行多少轮“思考/调用技能”
+          label:
+            en_US: Max steps
+            ja_JP: 最大ステップ
+            pt_BR: Max steps
+            zh_Hans: 执行轮数
+          llm_description: Max reasoning/tool steps inside one call.
+          max: null
+          min: null
+          name: max_steps
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: 12
+          form: form
+          human_description:
+            en_US: How many recent turns to keep during the run.
+            ja_JP: 実行中に保持する直近ターン数
+            pt_BR: How many recent turns to keep during the run.
+            zh_Hans: 单次调用内部保留最近多少轮上下文
+          label:
+            en_US: Memory turns
+            ja_JP: メモリターン
+            pt_BR: Memory turns
+            zh_Hans: 单轮窗口
+          llm_description: How many recent turns to keep during the run.
+          max: null
+          min: null
+          name: memory_turns
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        - auto_generate: null
+          default: 3
+          form: form
+          human_description:
+            en_US: How many previous runs to inject as raw transcript.
+            ja_JP: 以前の実行から挿入する原文のターン数
+            pt_BR: How many previous runs to inject as raw transcript.
+            zh_Hans: 跨回合注入最近多少轮原文对话（0 表示不注入）
+          label:
+            en_US: History turns
+            ja_JP: 履歴ターン
+            pt_BR: History turns
+            zh_Hans: 记忆窗口
+          llm_description: Inject previous turns as raw transcript for continuity.
+          max: null
+          min: null
+          name: history_turns
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: number
+        params:
+          files: ''
+          history_turns: ''
+          max_steps: ''
+          memory_turns: ''
+          model: ''
+          query: ''
+        plugin_id: lfenghx/skill_agent
+        plugin_unique_identifier: lfenghx/skill_agent:0.0.3@faa24604d1d36cbc6f60dec81eda58564cf79d86dae1472097636ae4b9f017fb
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=526cbb9c-ffec-4d93-812a-6b4f81c917b9&filename=93e635e707d0f9631baf46e983129f60beaf841f07fe3fdea136ba8dd553b645.svg
+        provider_id: lfenghx/skill_agent/skill_agent
+        provider_name: lfenghx/skill_agent/skill_agent
+        provider_type: builtin
+        selected: false
+        title: 文档回填
+        tool_configurations:
+          history_turns:
+            type: constant
+            value: 0
+          max_steps:
+            type: constant
+            value: 15
+          memory_turns:
+            type: constant
+            value: 12
+          model:
+            type: constant
+            value:
+              completion_params: {}
+              mode: chat
+              model: qwen3.6:35b-a3b
+              model_type: llm
+              provider: langgenius/ollama/ollama
+        tool_description: 可基于Skill渐进式披露模式执行任务的Agent插件
+        tool_label: Skill_Agent
+        tool_name: skill_agent
+        tool_node_version: '2'
+        tool_parameters:
+          files:
+            type: variable
+            value:
+            - start
+            - doc_file
+          query:
+            type: mixed
+            value: '你在一个自动化工作流中运行，没有用户可以回复你。禁止提问、禁止只描述计划、禁止中途停下。
+
+
+              任务：用 docx-translate-v2 技能的 rebuild，把译文回填进原始 .docx。译文已在 MinIO，你无需创建或写入任何文件。
+
+
+              files 输入里给了原始 .docx。请【实际调用工具执行】，做完再结束：
+
+              1. 执行（translations 从 MinIO 直取，不要自己写文件）：
+
+              python scripts/rebuild_docx.py <原始docx路径> --minio-object rotech_translations.json
+              --minio-endpoint http://minio:9000 --minio-bucket difyai --minio-access-key
+              admin --minio-secret-key 6YGl55yL54CR5biD5oyC5YmN5bed -o translated.docx
+
+              2. 把生成的 translated.docx 作为文件输出返回。
+
+
+              严禁：翻译；只描述计划（"写入意图确认""随后发起工具调用"）而不实际执行；返回文件前就结束。
+
+              '
+        type: tool
+      height: 165
+      id: '1783045208480'
+      position:
+        x: 4388
+        y: 93
+      positionAbsolute:
+        x: 4388
+        y: 93
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        is_array_file: true
+        selected: false
+        title: 文档提取器
+        type: document-extractor
+        variable_selector:
+        - '1783045078386'
+        - files
+      height: 103
+      id: '1783405753304'
+      position:
+        x: 684
+        y: 109
+      positionAbsolute:
+        x: 684
+        y: 109
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        is_team_authorization: true
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The access key for MinIO authentication.
+            ja_JP: The access key for MinIO authentication.
+            pt_BR: The access key for MinIO authentication.
+            zh_Hans: 用于MinIO身份验证的访问密钥。
+          label:
+            en_US: MinIO Access Key
+            ja_JP: MinIO Access Key
+            pt_BR: MinIO Access Key
+            zh_Hans: MinIO访问密钥
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: access_key
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The secret key for MinIO authentication.
+            ja_JP: The secret key for MinIO authentication.
+            pt_BR: The secret key for MinIO authentication.
+            zh_Hans: 用于MinIO身份验证的秘密密钥。
+          label:
+            en_US: MinIO Secret Key
+            ja_JP: MinIO Secret Key
+            pt_BR: MinIO Secret Key
+            zh_Hans: MinIO秘密密钥
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: secret_key
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            ja_JP: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            pt_BR: The endpoint URL of the MinIO server (e.g., http://localhost:9000).
+            zh_Hans: MinIO服务器的端点URL（例如 http://localhost:9000）。
+          label:
+            en_US: MinIO Endpoint URL
+            ja_JP: MinIO Endpoint URL
+            pt_BR: MinIO Endpoint URL
+            zh_Hans: MinIO端点URL
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: endpoint
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: form
+          human_description:
+            en_US: The name of the MinIO bucket to write to.
+            ja_JP: The name of the MinIO bucket to write to.
+            pt_BR: The name of the MinIO bucket to write to.
+            zh_Hans: 要写入的MinIO存储桶名称。
+          label:
+            en_US: Bucket Name
+            ja_JP: Bucket Name
+            pt_BR: Bucket Name
+            zh_Hans: 存储桶名称
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: bucket_name
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The content to be written to MinIO.
+            ja_JP: The content to be written to MinIO.
+            pt_BR: The content to be written to MinIO.
+            zh_Hans: 要写入MinIO的内容。
+          label:
+            en_US: Content
+            ja_JP: Content
+            pt_BR: Content
+            zh_Hans: 内容
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: content
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: The name of the object/file in the MinIO bucket.
+            ja_JP: The name of the object/file in the MinIO bucket.
+            pt_BR: The name of the object/file in the MinIO bucket.
+            zh_Hans: MinIO存储桶中的对象/文件名。
+          label:
+            en_US: Object Name
+            ja_JP: Object Name
+            pt_BR: Object Name
+            zh_Hans: 对象名称
+          llm_description: A tool to write generated content to a MinIO bucket.
+          max: null
+          min: null
+          name: object_name
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          access_key: ''
+          bucket_name: ''
+          content: ''
+          endpoint: ''
+          object_name: ''
+          secret_key: ''
+        plugin_id: aias00/minio
+        plugin_unique_identifier: aias00/minio:0.0.3@fca0552e7b28a2ddba431e1becf5d0d47ceeca577d238657db07dd9147817b59
+        provider_icon: /console/api/workspaces/current/plugin/icon?tenant_id=526cbb9c-ffec-4d93-812a-6b4f81c917b9&filename=4cea37eba8c83ef0cff1dd7668ac0be3d1cc121d9a04e52951d2791811efcda6.svg
+        provider_id: aias00/minio/minio
+        provider_name: aias00/minio/minio
+        provider_type: builtin
+        selected: false
+        title: MinIO写入工具
+        tool_configurations:
+          access_key:
+            type: mixed
+            value: admin
+          bucket_name:
+            type: mixed
+            value: difyai
+          endpoint:
+            type: mixed
+            value: http://minio:9000
+          secret_key:
+            type: mixed
+            value: 6YGl55yL54CR5biD5oyC5YmN5bed
+        tool_description: 将内容写入MinIO存储桶的工具。
+        tool_label: MinIO写入工具
+        tool_name: minio_writer
+        tool_node_version: '2'
+        tool_parameters:
+          content:
+            type: mixed
+            value: '{{#sanitize_merge.translations_json#}}'
+          object_name:
+            type: mixed
+            value: rotech_translations.json
+        type: tool
+      height: 165
+      id: '1783565746655'
+      position:
+        x: 4046
+        y: 93
+      positionAbsolute:
+        x: 4046
+        y: 93
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "import json\n\nBATCH_SIZE = 20  # segments per batch; ~40 keeps each\
+          \ batch's output well under num_predict=4096\n\ndef _extract(blob):\n  \
+          \  if not blob:\n        return {}\n    try:\n        o = json.loads(blob)\n\
+          \        if isinstance(o, dict) and \"segments\" in o:\n            return\
+          \ o\n    except Exception:\n        pass\n    dec = json.JSONDecoder();\
+          \ i = 0\n    while i < len(blob):\n        j = blob.find(\"{\", i)\n   \
+          \     if j < 0:\n            break\n        try:\n            o, end = dec.raw_decode(blob,\
+          \ j)\n            if isinstance(o, dict) and \"segments\" in o:\n      \
+          \          return o\n            i = end\n        except json.JSONDecodeError:\n\
+          \            i = j + 1\n    return {}\n\ndef main(segments_clean: str) ->\
+          \ dict:\n    obj = _extract(segments_clean or \"\")\n    segs = obj.get(\"\
+          segments\", []) if isinstance(obj, dict) else []\n    batches = []\n   \
+          \ for k in range(0, len(segs), BATCH_SIZE):\n        batches.append(json.dumps({\"\
+          segments\": segs[k:k+BATCH_SIZE]}, ensure_ascii=False))\n    if not batches:\n\
+          \        batches = [json.dumps({\"segments\": []}, ensure_ascii=False)]\n\
+          \    return {\"batches\": batches, \"batch_count\": len(batches), \"segment_count\"\
+          : len(segs)}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          batch_count:
+            children: null
+            type: number
+          batches:
+            children: null
+            type: array[string]
+          segment_count:
+            children: null
+            type: number
+        selected: false
+        title: 切批 (segments→batches)
+        type: code
+        variables:
+        - value_selector:
+          - '1782788684065'
+          - segments_clean
+          variable: segments_clean
+      height: 51
+      id: split_batches
+      position:
+        x: 1710
+        y: 135
+      positionAbsolute:
+        x: 1710
+        y: 135
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        error_handle_mode: terminated
+        height: 208
+        is_parallel: false
+        iterator_selector:
+        - split_batches
+        - batches
+        output_selector:
+        - llm_local_batch
+        - text
+        output_type: array[string]
+        parallel_nums: 10
+        selected: false
+        start_node_id: iter_local_start
+        title: 批量翻译(本地/敏感)
+        type: iteration
+        width: 486
+      height: 208
+      id: iter_local
+      position:
+        x: 2410.429962909078
+        y: -46.61147127324353
+      positionAbsolute:
+        x: 2410.429962909078
+        y: -46.61147127324353
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 486
+      zIndex: 1
+    - data:
+        desc: ''
+        isInIteration: true
+        selected: false
+        title: ''
+        type: iteration-start
+      draggable: false
+      height: 48
+      id: iter_local_start
+      parentId: iter_local
+      position:
+        x: 60
+        y: 80
+      positionAbsolute:
+        x: 2470.429962909078
+        y: 33.38852872675647
+      selectable: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-iteration-start
+      width: 44
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_local
+        model:
+          completion_params:
+            num_ctx: 24576
+            num_predict: 4096
+            temperature: 0
+            think: false
+          mode: chat
+          name: qwen3.6:35b-a3b
+          provider: langgenius/ollama/ollama
+        prompt_template:
+        - id: sys
+          role: system
+          text: '/no_think
+
+            Do not output reasoning or process steps. Output the answer directly.
+
+            你是 DE<->IT 专业技术翻译，领域为排水/管道/无开挖修复(Schlauchlining/CIPP)。
+
+            下面用户消息里是一个 JSON，segments 数组中每个对象含 id 和 text。
+
+            请只翻译每个 text 的内容；id 与数组顺序保持不变；JSON 结构保持不变。
+
+            只输出翻译后的 JSON 本身，不要任何解释，不要用代码块或 ``` 包裹。
+
+            {{#1782788684065.prompt_block#}}'
+        - id: usr
+          role: user
+          text: '翻译方向: {{#start.direction#}}
+
+
+            待翻译 JSON:
+
+            {{#iter_local.item#}}
+
+
+            /no_think'
+        selected: false
+        title: 翻译本批(本地)
+        type: llm
+        vision:
+          enabled: false
+      extent: parent
+      height: 87
+      id: llm_local_batch
+      parentId: iter_local
+      position:
+        x: 184
+        y: 60
+      positionAbsolute:
+        x: 2594.429962909078
+        y: 13.38852872675647
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        code: "import json\n\ndef _extract(blob):\n    if not blob:\n        return\
+          \ None\n    dec = json.JSONDecoder(); i = 0\n    while i < len(blob):\n\
+          \        j = blob.find(\"{\", i)\n        if j < 0:\n            break\n\
+          \        try:\n            o, end = dec.raw_decode(blob, j)\n          \
+          \  if isinstance(o, dict) and \"segments\" in o:\n                return\
+          \ o\n            i = end\n        except json.JSONDecodeError:\n       \
+          \     i = j + 1\n    return None\n\ndef main(batch_results) -> dict:\n \
+          \   if isinstance(batch_results, str):\n        batch_results = [batch_results]\n\
+          \    all_segs, failed = [], 0\n    for r in (batch_results or []):\n   \
+          \     o = _extract(r if isinstance(r, str) else \"\")\n        if o is None:\n\
+          \            failed += 1\n            continue\n        all_segs.extend(o.get(\"\
+          segments\", []))\n    clean = json.dumps({\"segments\": all_segs}, ensure_ascii=False)\n\
+          \    note = f\"{len(all_segs)} segments merged from {len(batch_results or\
+          \ [])} batches\"\n    if failed:\n        note += f\"; {failed} batch(es)\
+          \ unparseable (truncated?) -> those segments left untranslated\"\n    return\
+          \ {\"translations_json\": clean, \"segment_count\": len(all_segs), \"note\"\
+          : note}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          note:
+            children: null
+            type: string
+          segment_count:
+            children: null
+            type: number
+          translations_json:
+            children: null
+            type: string
+        selected: false
+        title: 重组 (batches→完整JSON)
+        type: code
+        variables:
+        - value_selector:
+          - iter_local
+          - output
+          variable: batch_results
+      height: 51
+      id: reassemble_local
+      position:
+        x: 2979.769789818108
+        y: 37.52860290860069
+      positionAbsolute:
+        x: 2979.769789818108
+        y: 37.52860290860069
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "import json\n\ndef _extract_json(blob):\n    \"\"\"Pull the first {...}\
+          \ object that contains 'segments' out of a noisy blob\n    (handles ```json\
+          \ fences, leading prose, trailing junk from weak models).\"\"\"\n    if\
+          \ not blob:\n        return None\n    dec = json.JSONDecoder()\n    i, n\
+          \ = 0, len(blob)\n    while i < n:\n        j = blob.find(\"{\", i)\n  \
+          \      if j < 0:\n            break\n        try:\n            obj, end\
+          \ = dec.raw_decode(blob, j)\n            if isinstance(obj, dict) and \"\
+          segments\" in obj:\n                return obj\n            i = end\n  \
+          \      except json.JSONDecodeError:\n            i = j + 1\n    return None\n\
+          \ndef main(raw: str) -> dict:\n    raw = raw or \"\"\n    obj = _extract_json(raw)\n\
+          \    if obj is None:\n        # nothing usable -> surface it clearly instead\
+          \ of writing empty to MinIO\n        return {\"translations_json\": \"\"\
+          , \"ok\": False,\n                \"note\": \"no valid segments JSON found\
+          \ in model output (likely empty/truncated)\"}\n    segs = obj.get(\"segments\"\
+          , [])\n    clean = json.dumps({\"segments\": segs}, ensure_ascii=False)\n\
+          \    return {\"translations_json\": clean, \"ok\": True, \"note\": f\"{len(segs)}\
+          \ segments\"}\n"
+        code_language: python3
+        desc: ''
+        outputs:
+          note:
+            children: null
+            type: string
+          ok:
+            children: null
+            type: boolean
+          translations_json:
+            children: null
+            type: string
+        selected: false
+        title: JSON清洗
+        type: code
+        variables:
+        - value_selector:
+          - merge
+          - output
+          variable: raw
+      height: 51
+      id: sanitize_merge
+      position:
+        x: 3704
+        y: 150
+      positionAbsolute:
+        x: 3704
+        y: 150
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    viewport:
+      x: 137.878422450402
+      y: 328.41856952663807
+      zoom: 0.8253188162336832
+  rag_pipeline_variables: []
