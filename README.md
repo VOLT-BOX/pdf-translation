@@ -1,274 +1,408 @@
-# 统一 PDF 翻译服务
+# PDF Translation
 
-把 **v3(babeldoc)** 与 **RetainPDF** 合并成**一个 FastAPI 进程**:整本单引擎路由,
-默认整本走 RetainPDF(OCR),`text_based=true` 则整本走 v3(复用文字层,版面保持好)。
-对外一套 `/tasks` 接口,无需再起三个容器。
+一个可 Docker 部署的 PDF 翻译服务。项目提供统一的 FastAPI 接口，可以上传 PDF，创建翻译任务，查询任务进度，并下载翻译后的 PDF 或双语对照表。
 
-## 为什么合并
+本文档重点说明如何把项目 clone 下来并直接运行。
 
-原架构是三个独立服务,router 通过 HTTP 调 v3(:8001)和 RetainPDF(:8020):
-- 多容器/多端口/多 compose,部署重;router↔引擎间 HTTP 跳变多余。
-- 轮询开销、超时对齐麻烦(v3 的 TASK_TIMEOUT 曾误杀快完成的任务)。
+## 快速开始
 
-合并后:一个进程、一个端口(8030)、一个 compose。v3 直调(无 HTTP),RetainPDF 保留
-subprocess(隔离其 `apply_layout_tuning` 进程全局态,这是必须的,不是冗余)。
+### 1. 克隆项目
 
-## 两条引擎的调用方式
-
-| | v3 (babeldoc) | RetainPDF |
-|---|---|---|
-| 调用 | **进程内直调** `v3_worker.run_translate` | **subprocess** `python run_job.py spec.json` |
-| 为何如此 | `run_translate` 自包含、无全局态冲突 | `apply_layout_tuning` 是进程全局态,并发会互相踩,subprocess 隔离 |
-
-## 架构
-
-```
-客户端 POST /tasks (PDF + 超集参数)
-  │
-  ▼
-统一服务(FastAPI, :8030)
-  1. 整本单引擎路由(`text_based` 参数):
-     - `text_based=false`(默认)→ 整本走 RetainPDF(OCR)
-     - `text_based=true`       → 整本走 v3(复用文字层)
-     不做逐页检测——逐页切分会在 v3↔OCR 引擎边界处把跨页断句割断,整本统一才是正确解。
-  2. 决策:retainpdf / v3(不再有 mixed)
-  3. 编排:
-     - v3:     进程内直调 run_translate(同步,进度回调)
-     - retain: subprocess 跑 run_job.py(同步,跑完取产物)
-  4. 合并:按原页序拼 mono/dual PDF + concat bilingual CSV
-  │
-  ▼
-  v3_worker.run_translate      retain.run_retain (subprocess)
-  (babeldoc,进程内)            (pipeline + typst,子进程)
+```bash
+git clone https://github.com/VOLT-BOX/pdf-translation.git
+cd pdf-translation
 ```
 
-## 目录结构
+### 2. 准备环境变量
 
-| 文件 | 作用 | 来源 |
-|---|---|---|
-| `app.py` | FastAPI 路由 + 任务存储 + worker 队列 + /normalize | 新写(合并 router + normalize) |
-| `orchestrate.py` | 编排:v3 直调 + RetainPDF subprocess,无 httpx | 新写 |
-| `classify.py` | 整本单引擎路由 + 切片 + manifest | 改自 router/(去掉逐页图片覆盖率判定) |
-| `merge.py` | 按页序合并 + CSV concat | 拷自 router/(零改) |
-| `config.py` | 合并配置(LLM/paddle/typst/阈值) | 新写 |
-| `v3_worker.py` | babeldoc 翻译(解耦版) | 改自 v3/service/worker.py |
-| `v3_models.py` | TranslateParams/V3Record | 改自 v3/service/models.py |
-| `retain.py` | RetainPDF spec 构造 + subprocess + 产物分类 | 改自 RetainPDF app.py |
-| `normalize.py` | PDF 标准化到 A4(函数) | 改自 normalize_pdf_service.py |
-| `babeldoc/` | babeldoc 引擎源码(vendored) | 原样拷自 v3/babeldoc/ |
-| `pipeline/` | RetainPDF 官方 pipeline 源码 | 原样拷自 RetainPDF/.../pipeline/ |
-| `run_job.py` | RetainPDF 子进程入口 | 原样拷 |
-| `fonts/` `fontconfig/` | 思源宋体 + 字体别名 | 原样拷 |
-| `pyproject.toml` | babeldoc 可编辑安装声明 | 拷自 v3/ |
-| `Dockerfile` `entrypoint.sh` `docker-compose.yml` | 部署 | 新写/合并 |
+项目不会提交真实密钥。首次运行前，先复制一份 `.env`：
 
-## 接口
+```bash
+cp .env.example .env
+```
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| POST | `/tasks` | 上传 PDF + 超集参数,返回 task_id(202) |
-| GET | `/tasks` | 列出所有任务 |
-| GET | `/tasks/{id}` | 查状态/进度/决策 |
-| GET | `/tasks/{id}/result?type=mono\|dual\|bilingual` | 下载合并产物 |
-| GET | `/tasks/{id}/bilingual` | 实时下载已翻译的原文↔译文对照表 CSV(运行中可用) |
-| DELETE | `/tasks/{id}` | 删任务及工作目录 |
-| POST | `/normalize` | PDF 页面标准化到 A4 |
-| POST | `/images/translate` | 图片翻译(同步):图→PDF→RetainPDF(OCR)→译文图(同尺寸 PNG) |
-| POST | `/images/translate/async` | 图片翻译(异步):提交返回 task_id,后台翻译 |
-| GET | `/images/translate/{id}` | 查图片翻译状态 |
-| GET | `/images/translate/{id}/result` | 下载译文图(同尺寸 PNG) |
-| GET | `/health` | 健康检查 |
-| GET | `/docs` | Swagger UI |
+Windows PowerShell 可以使用：
 
-任务状态:`pending` → `running` → `succeeded` / `failed`
+```powershell
+Copy-Item .env.example .env
+```
 
-### 创建任务参数(POST /tasks,multipart/form-data)
+然后编辑 `.env`，填写自己的模型接口配置：
 
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `file` | File | 必填 | 待翻译 PDF(原生/扫描/混合均可) |
-| `lang_in` | str | `en` | 源语言 |
-| `lang_out` | str | `zh` | 目标语言 |
-| `concurrency` | int | `4` | v3 作 qps(上限 20)、RetainPDF 作 workers |
-| `openai_api_key` | str | 无 | LLM key;缺则服务端 `LLM_API_KEY` 兜底(两引擎共用) |
-| `openai_model` | str | 无 | 模型名(留空用服务端默认) |
-| `openai_base_url` | str | 无 | OpenAI 兼容服务地址 |
-| `paddle_token` | str | 无 | RetainPDF 用(扫描页);缺则服务端 env 兜底 |
-| `mode` | str | `fast` | RetainPDF 翻译模式:fast/precise/sci |
-| `no_mono` | bool | `false` | v3 用:不输出单语 PDF |
-| `no_watermark` | bool | `true` | v3 用:去水印 |
-| `glossary` | File | 无 | 可选术语表 CSV/XLSX(表头含 source、target) |
-| `glossary_hard` | bool | `false` | 术语硬约束 |
-| `custom_system_prompt` | str | 无 | 自定义译者系统提示 |
-| `callback_url` | str | 无 | 翻译完成后 POST 通知此 URL |
-| `text_based` | bool | `false` | 文本型 PDF(有文字层)填 true 复用文字层直译;扫描件/图片型 PDF 填 false 走 OCR |
-| `enable_table_translation` | bool | `false` | RetainPDF 扫描页:是否翻译表格(默认 False=跳过表格) |
+```env
+LLM_API_KEY=your_api_key
+LLM_MODEL=your_model_name
+LLM_BASE_URL=https://your-api-base-url/v1
+RETAIN_PADDLE_TOKEN=your_paddle_ocr_token
+PORT=8040
+```
 
-返回 202(回显关键输入,脱敏不含 `openai_api_key`):
+常用配置说明：
+
+| 变量 | 是否必填 | 说明 |
+| --- | --- | --- |
+| `LLM_API_KEY` | 是 | 大模型 API Key。不要提交到 GitHub。 |
+| `LLM_MODEL` | 是 | 翻译使用的模型名称。 |
+| `LLM_BASE_URL` | 是 | OpenAI 兼容接口地址。 |
+| `RETAIN_PADDLE_TOKEN` | 视情况 | 扫描件/OCR 场景需要。只翻译带文字层的 PDF 时可不填。 |
+| `PORT` | 否 | 服务端口，默认 `8040`。 |
+| `WORK_ROOT` | 否 | 容器内工作目录，默认 `/data`。 |
+| `RETENTION_SECONDS` | 否 | 结果文件保留时间，默认 `3600` 秒。 |
+| `RETAIN_TIMEOUT` | 否 | OCR 翻译子进程超时时间，默认 `3600` 秒。 |
+
+### 3. Docker 启动
+
+在项目根目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+启动后访问：
+
+```text
+http://localhost:8040
+```
+
+接口文档地址：
+
+```text
+http://localhost:8040/docs
+```
+
+如果部署在服务器上，把 `localhost` 换成服务器 IP 或域名即可。
+
+## 修改部署端口
+
+默认端口是 `8040`。
+
+如果想改成 `8080`，修改 `.env`：
+
+```env
+PORT=8080
+```
+
+然后重启服务：
+
+```bash
+docker compose down
+docker compose up -d --build
+```
+
+新的访问地址是：
+
+```text
+http://localhost:8080/docs
+```
+
+端口映射由 `docker-compose.yml` 控制：
+
+```yaml
+ports:
+  - "${PORT:-8040}:${PORT:-8040}"
+```
+
+也就是说，`.env` 里的 `PORT` 会同时决定宿主机端口和容器内服务端口。
+
+## 常用 Docker 命令
+
+查看服务状态：
+
+```bash
+docker compose ps
+```
+
+查看日志：
+
+```bash
+docker compose logs -f
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+重新构建：
+
+```bash
+docker compose up -d --build
+```
+
+## 接口调用
+
+服务启动后，推荐先打开 Swagger 页面调试：
+
+```text
+http://localhost:8040/docs
+```
+
+完整流程一般是：
+
+```text
+上传 PDF -> 创建翻译任务 -> 查询任务状态 -> 下载翻译结果
+```
+
+### 健康检查
+
+```bash
+curl http://localhost:8040/health
+```
+
+### 创建 PDF 翻译任务
+
+接口：
+
+```text
+POST /tasks
+```
+
+示例，扫描件或图片型 PDF 默认走 OCR：
+
+```bash
+curl -X POST http://localhost:8040/tasks \
+  -F "file=@example.pdf" \
+  -F "lang_in=en" \
+  -F "lang_out=zh" \
+  -F "text_based=false"
+```
+
+如果 PDF 本身有文字层，希望复用原文字层进行翻译，可以设置 `text_based=true`：
+
+```bash
+curl -X POST http://localhost:8040/tasks \
+  -F "file=@example.pdf" \
+  -F "lang_in=en" \
+  -F "lang_out=zh" \
+  -F "text_based=true"
+```
+
+接口会返回任务 ID，例如：
 
 ```json
 {
   "task_id": "7c40a92e0dbf4342bc92690ae4c0269f",
-  "status": "pending",
-  "original_filename": "mixed.pdf",
-  "created_at": "2026-08-13T...",
-  "progress": 0.0,
-  "stage": "",
-  "decision": "",
-  "result_files": [],
-  "error": null,
-  "lang_in": "en",
-  "lang_out": "zh",
-  "concurrency": 4,
-  "custom_system_prompt": null,
-  "glossary_hard": false
+  "status": "pending"
 }
 ```
 
-`GET /tasks/{id}` 同上,分类后 `decision` 取值 `v3` / `retainpdf`(不再有 `mixed`)。
-
-### 下载结果
+### 查询任务状态
 
 ```bash
-curl -o merged.pdf    "http://<host>:8030/tasks/<id>/result?type=mono"
-curl -o dual.pdf      "http://<host>:8030/tasks/<id>/result?type=dual"
-curl -o bilingual.csv "http://<host>:8030/tasks/<id>/result?type=bilingual"
+curl http://localhost:8040/tasks/<task_id>
 ```
 
-- `mono`:必有,按原页序合并的纯译文 PDF。
-- `dual`:best-effort(整本单引擎下,双引擎页数 1:1 才合并)。
-- `bilingual`:原文↔译文对照表 CSV(单引擎产物直通)。
+任务状态通常包括：
 
-### 图片翻译(POST /images/translate)
+```text
+pending / running / succeeded / failed
+```
 
-单张图片 → 内部转 PDF → RetainPDF(OCR)翻译 → 转回**与原图同尺寸**的 PNG,同步返回图片字节。
+返回结果里可以看到进度、任务阶段、引擎选择和错误信息。
 
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `file` | File | 必填 | 单张图片(png/jpg/webp 等) |
-| `lang_in` | str | `en` | 源语言 |
-| `lang_out` | str | `zh` | 目标语言 |
-| `openai_api_key` | str | 无 | LLM key;缺则服务端 `LLM_API_KEY` 兜底 |
-| `openai_model` | str | 无 | 模型名(留空用默认) |
-| `openai_base_url` | str | 无 | OpenAI 兼容服务地址 |
-| `paddle_token` | str | 无 | PaddleOCR token;缺则服务端 env 兜底 |
-| `mode` | str | `fast` | RetainPDF 翻译模式:fast/precise/sci |
-| `custom_system_prompt` | str | 无 | 自定义译者系统提示 |
-| `enable_table_translation` | bool | `false` | 图片含表格时是否翻译表格 |
+### 下载翻译结果
 
-尺寸还原原理:图转 PDF 时**等比缩放、不留白**(长边压到 ≤842pt,避免像素当 point 的巨纸夹死字号),译文 PDF 再按同一比例光栅化回原始像素,故宽高比与像素尺寸精确一致。响应头 `X-Image-Size` 返回 `w x h`(px)。
+下载纯译文 PDF：
 
 ```bash
-curl -X POST http://<host>:8030/images/translate \
-  -F "file=@scan.png" -F "lang_out=zh" \
-  -F "openai_api_key=sk-xxx" -F "paddle_token=xxx" \
+curl -L "http://localhost:8040/tasks/<task_id>/result?type=mono" -o translated.pdf
+```
+
+下载双语 PDF，如果当前任务生成了该文件：
+
+```bash
+curl -L "http://localhost:8040/tasks/<task_id>/result?type=dual" -o dual.pdf
+```
+
+下载双语对照表 CSV：
+
+```bash
+curl -L "http://localhost:8040/tasks/<task_id>/result?type=bilingual" -o bilingual.csv
+```
+
+运行中也可以尝试实时获取已生成的双语对照表：
+
+```bash
+curl -L "http://localhost:8040/tasks/<task_id>/bilingual" -o bilingual.csv
+```
+
+### 删除任务
+
+```bash
+curl -X DELETE http://localhost:8040/tasks/<task_id>
+```
+
+删除后会清理对应任务的工作目录。
+
+## 图片翻译接口
+
+项目也提供图片翻译接口，会把图片转成 PDF，翻译后再导出为 PNG。
+
+### 同步图片翻译
+
+```bash
+curl -X POST http://localhost:8040/images/translate \
+  -F "file=@scan.png" \
+  -F "lang_in=en" \
+  -F "lang_out=zh" \
   -o translated.png
-# → 响应头 X-Image-Size: 1200x800(与输入一致)
 ```
 
-### 图片翻译(异步,POST /images/translate/async)
+### 异步图片翻译
 
-先提交、后下载,适合大图/批量/需要进度查询的场景;参数与同步版一致。
+提交任务：
 
 ```bash
-# 1) 提交(返回 task_id,202)
-curl -X POST http://<host>:8030/images/translate/async \
-  -F "file=@scan.png" -F "lang_out=zh" \
-  -F "openai_api_key=sk-xxx" -F "paddle_token=xxx"
-# → {"task_id":"7c40...","status":"pending","kind":"image","image_size":"1200x800",...}
-
-# 2) 轮询状态(pending → running → succeeded)
-curl http://<host>:8030/images/translate/7c40...
-# → {"status":"succeeded","image_size":"1200x800","result_files":["scan.translated.png"],...}
-
-# 3) 下载译文图(与原图同尺寸 PNG)
-curl -o translated.png "http://<host>:8030/images/translate/7c40.../result"
+curl -X POST http://localhost:8040/images/translate/async \
+  -F "file=@scan.png" \
+  -F "lang_in=en" \
+  -F "lang_out=zh"
 ```
 
-与 `/tasks` 共用同一套任务存储:`GET /tasks` 里也会列出图片任务(`kind=image`),
-`DELETE /tasks/{id}` 可清理。
-
-## 部署
-
-### Docker
+查询状态：
 
 ```bash
-cd unified
-# 配凭证(复制 .env.example 为 .env 并填值,或直接 export)
-docker compose up -d --build
+curl http://localhost:8040/images/translate/<task_id>
 ```
 
-健康检查:
-```bash
-curl http://127.0.0.1:8030/health   # {"status":"ok","work_root":"/data"}
-```
-
-### 配置(环境变量)
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `LLM_API_KEY` | (空) | LLM key(v3 与 RetainPDF 共用),必填 |
-| `LLM_MODEL` | `deepseek-v4-flash` | 默认模型 |
-| `LLM_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI 兼容地址 |
-| `RETAIN_PADDLE_TOKEN` | (空) | PaddleOCR token(RetainPDF 扫描页用) |
-| `ALLOW_RETRANSLATE` | `true` | 允许重复翻译(禁用 babeldoc 标记检查) |
-| `MIN_TEXT_CHARS` | `10` | 已废弃(整本单引擎路由不再逐页判定) |
-| `IMAGE_COVER_THRESHOLD` | `0.45` | 已废弃(不再逐页判图片覆盖率) |
-| `IMAGE_DOMINANT_TEXT_CHARS` | `300` | 已废弃(不再逐页判定) |
-| `RETAIN_TIMEOUT` | `3600` | RetainPDF 子进程超时秒 |
-| `PORT` | `8030` | 服务端口 |
-| `WORK_ROOT` | `/data` | 工作目录 |
-| `RETENTION_SECONDS` | `3600` | 完成任务保留秒 |
-
-镜像 bake 的 Typst/字体 env(`TYPST_BIN`/`RETAIN_PDF_*FONT*` 等)由 Dockerfile 设好,无需手动配。
-
-### 本地开发(不用 Docker)
+下载结果：
 
 ```bash
-cd unified
-python -m venv .venv && .venv\Scripts\activate
-pip install -e . -r requirements.txt
-set LLM_API_KEY=sk-xxx
-python app.py
+curl -L http://localhost:8040/images/translate/<task_id>/result -o translated.png
 ```
 
-## 调用示例
+## PDF 标准化接口
+
+如果输入 PDF 页面尺寸不统一，可以先调用标准化接口：
 
 ```bash
-# 提交(默认整本走 RetainPDF/OCR)
-curl -X POST http://127.0.0.1:8030/tasks \
-  -F "file=@scan.pdf" -F "lang_out=zh" \
-  -F "openai_api_key=sk-xxx" -F "paddle_token=xxx"
-# → {"task_id":"7c40...","status":"pending",...}
-
-# 整本走 v3(复用文字层)
-curl -X POST http://127.0.0.1:8030/tasks \
-  -F "file=@native.pdf" -F "lang_out=zh" -F "text_based=true" \
-  -F "openai_api_key=sk-xxx"
-
-# 轮询(看 decision)
-curl http://127.0.0.1:8030/tasks/7c40...
-# → {"status":"succeeded","decision":"retainpdf",...}
-
-# 下载合并译文
-curl -o merged.pdf "http://127.0.0.1:8030/tasks/7c40.../result?type=mono"
-
-# 图片转 PDF 先标准化再翻译
-curl -X POST http://127.0.0.1:8030/normalize -F "file=@images.pdf" -o normalized.pdf
+curl -X POST http://localhost:8040/normalize \
+  -F "file=@input.pdf" \
+  -o normalized.pdf
 ```
 
-## 数据与排查
+## 主要参数说明
 
-- 任务数据在 `./data/<task_id>/`(`input.pdf`、切片、`v3_work/`、`retain_work/`、`output/` 合并结果)。
-- v3 产物在 `<task>/v3_work/output/`,RetainPDF 产物在 `<task>/retain_work/rendered/`。
-- 排查:`GET /tasks/{id}` 看 `decision`/`error`;RetainPDF 子任务 stderr 在 `retain_work/` 下,
-  也可看 `retain_work/spec.json`。
-- 内存存储,重启丢失。要持久化/扩容换 Redis。
+`POST /tasks` 使用 `multipart/form-data`。
 
-## 已知限制
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `file` | 必填 | 待翻译 PDF。 |
+| `lang_in` | `en` | 源语言。 |
+| `lang_out` | `zh` | 目标语言。 |
+| `text_based` | `false` | `true` 表示复用 PDF 文字层；`false` 表示走 OCR 场景。 |
+| `concurrency` | `4` | 并发数量。 |
+| `openai_api_key` | 空 | 可在请求里临时传入，也可以使用 `.env` 里的 `LLM_API_KEY`。 |
+| `openai_model` | 空 | 可在请求里临时指定模型。 |
+| `openai_base_url` | 空 | 可在请求里临时指定模型接口地址。 |
+| `paddle_token` | 空 | 可在请求里临时传入 OCR token。 |
+| `glossary` | 空 | 可选术语表文件。 |
+| `callback_url` | 空 | 任务完成后的回调地址。 |
+| `enable_table_translation` | `false` | 是否翻译表格内容。 |
 
-- 已去掉混合件模式:整本单引擎路由(默认 OCR,`text_based=true` 走 v3),避免引擎边界处的跨页断句割裂。
-  `merge.py` / `split_pdf` 的混合件兜底代码仍保留(dormant),不再被 `text_based` 路由触发。
-- RetainPDF subprocess 仍需 typst + 预览包 + 字体,镜像较大(2-3GB,含 onnx 模型)。
-- 串行 router worker(一次一个 PDF)。要扩容仍需多容器。
-- hyperscan 在 arm64 需构建链;先按 x86_64。
+通常只需要传 `file`、`lang_in`、`lang_out`、`text_based`。模型密钥建议统一放在 `.env` 中。
+
+## 本地数据目录
+
+运行时生成的上传文件、中间文件和翻译结果会写入 `data/`，容器内对应 `/data`。
+
+这些内容可能包含用户上传的文档和翻译结果，不建议提交到 GitHub。当前仓库已经通过 `.gitignore` 忽略了 `.env`、`data/`、PPT、PDF、图片结果、缓存和临时文件。
+
+`fonts/` 已提交到仓库，用于保证别人 clone 后可以直接 Docker 构建。
+
+## 常见问题
+
+### 1. 访问不了服务
+
+先看容器是否启动：
+
+```bash
+docker compose ps
+```
+
+再看日志：
+
+```bash
+docker compose logs -f
+```
+
+如果端口被占用，修改 `.env` 中的 `PORT`，然后重启。
+
+### 2. LLM 调用失败
+
+检查 `.env`：
+
+```env
+LLM_API_KEY=
+LLM_MODEL=
+LLM_BASE_URL=
+```
+
+确认 API Key、模型名和接口地址都正确，并且部署机器可以访问该接口。
+
+### 3. 扫描件翻译失败
+
+扫描件需要 OCR 能力，确认 `.env` 中配置了：
+
+```env
+RETAIN_PADDLE_TOKEN=
+```
+
+如果只翻译原生文字层 PDF，可以在创建任务时设置：
+
+```text
+text_based=true
+```
+
+### 4. Docker 构建失败
+
+确认当前目录是项目根目录，并且字体目录存在：
+
+```bash
+ls fonts
+```
+
+然后重新构建：
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
+## 项目处理流程
+
+```text
+上传 PDF
+  |
+  v
+文件校验与任务创建
+  |
+  v
+识别文档类型与翻译策略
+  |
+  +-- 原生 PDF / 复用文字层
+  |
+  +-- 扫描 PDF / OCR 场景
+  |
+  v
+OCR / 文本提取 / 版面解析
+  |
+  v
+生成中间文件
+  |
+  v
+按页或按块组织翻译请求
+  |
+  v
+调用 LLM API
+  |
+  v
+保存翻译结果
+  |
+  v
+按原坐标回填文字、重建页面
+  |
+  v
+生成结果文件和对照表
+```
