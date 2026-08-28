@@ -1,0 +1,47 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.token
+secrets/
+credentials/
+
+# Runtime data and generated results
+data/
+*.log
+*.jsonl
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.csv
+*.xlsx
+
+# Python cache and environments
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# Presentation and build scratch files
+.deck_tmp/
+.deck_tmp_*/
+*.pptx.inspect.ndjson
+~$*
+tmp/
+temp/
+build/
+dist/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+services:
+  unified:
+    build: .
+    image: unified-pdf-translate:latest
+    container_name: unified-pdf-translate
+    # 端口映射:宿主:容器。改端口须同时改 .env 的 PORT(容器内监听端口)与此处宿主端口。
+    ports:
+      - "${PORT:-8040}:${PORT:-8040}"
+    # 所有运行时配置走 .env:env_file 把整个 .env 灌进容器,
+    # .env 里改一项就生效,无需动 compose。容器内代码读这些 env(config.py)。
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

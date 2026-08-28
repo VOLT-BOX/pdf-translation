@@ -1,0 +1,18 @@
+# 统一服务依赖。
+# babeldoc 本体由 vendored babeldoc/ 的可编辑安装提供(见 Dockerfile),
+# 这里只列服务壳 + RetainPDF pipeline 运行时所需。
+
+# 服务壳
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+
+# RetainPDF pipeline 运行时(OCR 远程云,无需本地 PaddlePaddle)
+PyMuPDF
+Pillow
+pikepdf
+requests
+urllib3
+openpyxl
+hyperscan
