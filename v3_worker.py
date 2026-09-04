@@ -111,20 +111,20 @@ def _build_bilingual_csv(
 
 
 # 术语表进程级缓存(LRU max 1)。同一文件内容不变就复用编译好的 hyperscan DB。
-_GLOSSARY_CACHE: "OrderedDict[tuple[str, str], Glossary]" = OrderedDict()
+_GLOSSARY_CACHE: "OrderedDict[tuple[str, str, str], Glossary]" = OrderedDict()
 _GLOSSARY_CACHE_MAX = 1
 
 
-def _load_glossary_cached(path: Path, lang_out: str) -> Glossary:
-    """带 LRU 缓存的术语表加载:按 (文件内容哈希, 目标语言) 复用编译好的 Glossary。"""
+def _load_glossary_cached(path: Path, lang_in: str, lang_out: str) -> Glossary:
+    """带 LRU 缓存的术语表加载:按 (文件内容哈希, 源语言, 目标语言) 复用 Glossary。"""
     content_hash = hashlib.md5(path.read_bytes()).hexdigest()
-    key = (content_hash, lang_out)
+    key = (content_hash, lang_in, lang_out)
     cached = _GLOSSARY_CACHE.get(key)
     if cached is not None:
         _GLOSSARY_CACHE.move_to_end(key)
         logger.info(f"glossary cache hit: {path.name} ({len(cached.entries)} entries)")
         return cached
-    g = Glossary.from_file(path, lang_out)
+    g = Glossary.from_file(path, lang_out, lang_in)
     _GLOSSARY_CACHE[key] = g
     while len(_GLOSSARY_CACHE) > _GLOSSARY_CACHE_MAX:
         evicted_key, evicted_g = _GLOSSARY_CACHE.popitem(last=False)  # noqa: F841
@@ -202,7 +202,7 @@ def run_translate(
         user_glossaries: list[Glossary] = []
         if record.glossary_path is not None and record.glossary_path.exists():
             try:
-                g = _load_glossary_cached(record.glossary_path, params.lang_out)
+                g = _load_glossary_cached(record.glossary_path, params.lang_in, params.lang_out)
                 user_glossaries.append(g)
                 logger.info(
                     f"loaded glossary {record.glossary_path.name} "

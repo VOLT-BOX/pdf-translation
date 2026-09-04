@@ -26,6 +26,8 @@ import io
 import logging
 from pathlib import Path
 
+import fitz  # PyMuPDF
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 
@@ -42,6 +44,15 @@ from store import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified.service")
+
+
+def _pdf_page_count(path: Path) -> int:
+    doc = fitz.open(str(path))
+    try:
+        return int(doc.page_count)
+    finally:
+        doc.close()
+
 
 # 启动 worker / 清理线程(daemon)。放这里确保只启动一次(本模块加载即启动);
 # store.py 是全局单例,worker 拿到的 tasks_store / _task_queue 与本文件用的是同一份。
@@ -173,6 +184,8 @@ async def translate_image_async(
         "manifest": [],
         "sub_tasks": {},
         "progress": 0.0,
+        "translated_pages": 0,
+        "total_pages": 0,
         "stage": "",
         "image_size": f"{w}x{h}",
         "result_files": [],
@@ -216,8 +229,8 @@ async def create_task(
     mode: str = Form("fast", description="RetainPDF 翻译模式:fast/precise/sci"),
     no_mono: bool = Form(False, description="v3 用:不输出单语 PDF"),
     no_watermark: bool = Form(True, description="v3 用:去水印"),
-    glossary: UploadFile | None = File(None, description="可选术语表 CSV/XLSX"),
-    glossary_hard: bool = Form(False),
+    glossary: UploadFile | None = File(None, description="可选术语表 CSV/XLSX，表头支持 source,target,src_lng,tgt_lng,level"),
+    glossary_hard: bool = Form(False, description="对命中的术语启用占位符硬约束；只作用于成功匹配的 source"),
     custom_system_prompt: str | None = Form(None),
     callback_url: str | None = Form(None),
     text_based: bool = Form(False, description="文本型 PDF(有文字层)填 true 复用文字层直译;扫描件/图片型 PDF 填 false 走 OCR"),
@@ -236,6 +249,10 @@ async def create_task(
     # 保存上传 PDF
     input_path = work_dir / "input.pdf"
     input_path.write_bytes(await file.read())
+    try:
+        total_pages = _pdf_page_count(input_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"无法读取 PDF 页数: {exc}") from exc
 
     # 保存可选术语表(支持 .csv/.xlsx)
     glossary_path: str | None = None
@@ -279,6 +296,8 @@ async def create_task(
         "manifest": [],
         "sub_tasks": {},
         "progress": 0.0,
+        "translated_pages": 0,
+        "total_pages": total_pages,
         "stage": "",
         "result_files": [],
         "error": None,
@@ -401,3 +420,6 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host=settings.host, port=settings.port)
+
+
+

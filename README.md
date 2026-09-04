@@ -199,7 +199,19 @@ curl http://localhost:8040/tasks/<task_id>
 pending / running / succeeded / failed
 ```
 
-返回结果里可以看到进度、任务阶段、引擎选择和错误信息。
+返回结果里可以看到进度、任务阶段、引擎选择和错误信息。进度字段示例：
+
+```json
+{
+  "progress": 42.9,
+  "translated_pages": 3,
+  "total_pages": 7,
+  "page_progress": 42.9,
+  "stage_text": "正在翻译: 3 / 7 页"
+}
+```
+
+前端可以每 1-2 秒轮询一次 `GET /tasks/<task_id>`，用 `page_progress` 或 `progress` 展示百分比，用 `translated_pages / total_pages` 展示页数。
 
 ### 下载翻译结果
 
@@ -297,11 +309,37 @@ curl -X POST http://localhost:8040/normalize \
 | `openai_model` | 空 | 可在请求里临时指定模型。 |
 | `openai_base_url` | 空 | 可在请求里临时指定模型接口地址。 |
 | `paddle_token` | 空 | 可在请求里临时传入 OCR token。 |
-| `glossary` | 空 | 可选术语表文件。 |
+| `glossary` | 空 | 可选术语表文件，支持 CSV/XLSX。 |
+| `glossary_hard` | `false` | 对命中的术语启用占位符硬约束；只作用于成功匹配的 source。 |
 | `callback_url` | 空 | 任务完成后的回调地址。 |
 | `enable_table_translation` | `false` | 是否翻译表格内容。 |
 
 通常只需要传 `file`、`lang_in`、`lang_out`、`text_based`。模型密钥建议统一放在 `.env` 中。
+
+## 术语表格式
+
+术语表至少需要包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `source` | 原文术语。 |
+| `target` | 目标译法。 |
+| `src_lng` | 可选，源语言，如 `en`、`es`、`es-ES`。为空表示通用。 |
+| `tgt_lng` | 可选，目标语言，如 `zh`、`zh-CN`。为空表示通用。 |
+| `level` | 可选，`preferred` / `canonical` / `preserve`，默认 `preferred`。 |
+
+示例：
+
+```csv
+source,target,src_lng,tgt_lng,level
+steel,钢,en,zh,preferred
+acero,钢,es,zh,preferred
+API,API,,zh,preserve
+```
+
+系统会按当前任务的 `lang_in` 和 `lang_out` 过滤术语。例如 `lang_in=es&lang_out=zh` 时，`src_lng=en` 的术语不会进入本次任务，`src_lng=es` 和空 `src_lng` 的术语会保留。
+
+`glossary_hard=true` 不是整张术语表 100% 生效。它表示：当前文本中成功匹配到的术语会通过占位符进行更强约束；如果 OCR 识别、断行、复数、重音符号或源语言不一致导致没有匹配到，就不会强制替换。
 
 ## 本地数据目录
 

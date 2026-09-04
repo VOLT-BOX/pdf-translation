@@ -66,7 +66,7 @@ def _resolve_target_language_name(target_lang: str, explicit_name: str = "") -> 
 
 # ---------- 术语表解析(父进程 LRU 缓存) ----------
 
-_GLOSSARY_PARSE_CACHE: "OrderedDict[tuple[str, str], list[dict]]" = OrderedDict()
+_GLOSSARY_PARSE_CACHE: "OrderedDict[tuple[str, str, str], list[dict]]" = OrderedDict()
 _GLOSSARY_PARSE_CACHE_MAX = 8
 
 _VALID_LEVELS = {"preferred", "canonical", "preserve"}
@@ -75,6 +75,47 @@ _VALID_LEVELS = {"preferred", "canonical", "preserve"}
 def _normalize_level(value: str) -> str:
     lv = (value or "").strip().lower()
     return lv if lv in _VALID_LEVELS else "preferred"
+
+
+
+def _normalize_lang_main(value: str | None) -> str:
+    lang = (value or "").strip().lower().replace("_", "-")
+    if not lang or lang == "auto":
+        return ""
+    return lang.split("-", 1)[0]
+
+
+def _lang_matches(row_lang: str | None, requested_lang: str | None) -> bool:
+    row_main = _normalize_lang_main(row_lang)
+    if not row_main:
+        return True
+    requested_main = _normalize_lang_main(requested_lang)
+    if not requested_main:
+        return True
+    return row_main == requested_main
+
+
+def _first_value(mapping: dict, *names: str) -> str:
+    for name in names:
+        value = mapping.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _optional_column(col: dict[str, int], *names: str) -> int | None:
+    for name in names:
+        idx = col.get(name)
+        if idx is not None:
+            return idx
+    return None
+
+
+def _row_cell(row: tuple, idx: int | None) -> str:
+    if idx is None or idx >= len(row):
+        return ""
+    value = row[idx]
+    return str(value).strip() if value is not None else ""
 
 
 def _decode_csv_bytes(data: bytes) -> str:
@@ -86,31 +127,39 @@ def _decode_csv_bytes(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _parse_glossary_csv(data: bytes, target_lang: str) -> list[dict]:
-    """CSV: source,target,tgt_lng[,level]。tgt_lng 按目标语言过滤。"""
+def _parse_glossary_csv(data: bytes, source_lang: str, target_lang: str) -> list[dict]:
+    """CSV: source,target[,src_lng,tgt_lng,level]。语言列为空表示通用术语。"""
     if not data:
         return []
     text = _decode_csv_bytes(data)
     reader = csv.DictReader(io.StringIO(text))
-    if "source" not in (reader.fieldnames or []) or "target" not in (reader.fieldnames or []):
+    fieldnames = reader.fieldnames or []
+    if "source" not in fieldnames or "target" not in fieldnames:
         raise HTTPException(400, "glossary CSV must have 'source' and 'target' columns")
 
-    lang_main = (target_lang or "").strip().lower().split("-")[0]
     entries: list[dict] = []
     for row in reader:
         source = (row.get("source") or "").strip()
         target = (row.get("target") or "").strip()
         if not source or not target:
             continue
-        row_lang = (row.get("tgt_lng") or "").strip().lower().split("-")[0]
-        if row_lang and lang_main and row_lang != lang_main:
+        row_src_lang = _first_value(row, "src_lng", "src_lang", "source_lang", "source_language")
+        row_tgt_lang = _first_value(row, "tgt_lng", "tgt_lang", "target_lang", "target_language")
+        if not _lang_matches(row_src_lang, source_lang):
+            continue
+        if not _lang_matches(row_tgt_lang, target_lang):
             continue
         level = _normalize_level(row.get("level") or "")
-        entries.append({"source": source, "target": target, "level": level})
+        entry = {"source": source, "target": target, "level": level}
+        if row_src_lang:
+            entry["src_lng"] = row_src_lang
+        if row_tgt_lang:
+            entry["tgt_lng"] = row_tgt_lang
+        entries.append(entry)
     return entries
 
 
-def _parse_glossary_xlsx(data: bytes, target_lang: str) -> list[dict]:
+def _parse_glossary_xlsx(data: bytes, source_lang: str, target_lang: str) -> list[dict]:
     if not data:
         return []
     try:
@@ -118,7 +167,6 @@ def _parse_glossary_xlsx(data: bytes, target_lang: str) -> list[dict]:
     except ImportError as exc:
         raise HTTPException(500, "加载 xlsx 术语表需要 openpyxl") from exc
 
-    lang_main = (target_lang or "").strip().lower().replace("-", "_")
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     try:
         ws = wb.active
@@ -131,7 +179,8 @@ def _parse_glossary_xlsx(data: bytes, target_lang: str) -> list[dict]:
         if "source" not in header or "target" not in header:
             raise HTTPException(400, f"xlsx 术语表表头须含 source、target,实际: {header}")
         col = {name: i for i, name in enumerate(header)}
-        tgt_lng_idx = col.get("tgt_lng")
+        src_lng_idx = _optional_column(col, "src_lng", "src_lang", "source_lang", "source_language")
+        tgt_lng_idx = _optional_column(col, "tgt_lng", "tgt_lang", "target_lang", "target_language")
         level_idx = col.get("level")
 
         entries: list[dict] = []
@@ -144,22 +193,27 @@ def _parse_glossary_xlsx(data: bytes, target_lang: str) -> list[dict]:
             target = str(target).strip()
             if not source or not target:
                 continue
-            if tgt_lng_idx is not None:
-                raw = row[tgt_lng_idx] if tgt_lng_idx < len(row) else None
-                row_lang = str(raw).strip().lower().replace("-", "_") if raw is not None else ""
-                if row_lang and lang_main and row_lang != lang_main:
-                    continue
+            row_src_lang = _row_cell(row, src_lng_idx)
+            row_tgt_lang = _row_cell(row, tgt_lng_idx)
+            if not _lang_matches(row_src_lang, source_lang):
+                continue
+            if not _lang_matches(row_tgt_lang, target_lang):
+                continue
             level = "preferred"
             if level_idx is not None:
-                raw_lv = row[level_idx] if level_idx < len(row) else None
-                level = _normalize_level(str(raw_lv) if raw_lv is not None else "")
-            entries.append({"source": source, "target": target, "level": level})
+                level = _normalize_level(_row_cell(row, level_idx))
+            entry = {"source": source, "target": target, "level": level}
+            if row_src_lang:
+                entry["src_lng"] = row_src_lang
+            if row_tgt_lang:
+                entry["tgt_lng"] = row_tgt_lang
+            entries.append(entry)
         return entries
     finally:
         wb.close()
 
 
-def _parse_glossary_json_str(text: str, target_lang: str) -> list[dict]:
+def _parse_glossary_json_str(text: str, source_lang: str, target_lang: str) -> list[dict]:
     text = (text or "").strip()
     if not text:
         return []
@@ -169,7 +223,6 @@ def _parse_glossary_json_str(text: str, target_lang: str) -> list[dict]:
         raise HTTPException(400, f"glossary_json is not valid JSON: {exc}")
     if not isinstance(payload, list):
         raise HTTPException(400, "glossary_json must be a JSON array")
-    lang_main = (target_lang or "").strip().lower().split("-")[0]
     entries: list[dict] = []
     for item in payload:
         if not isinstance(item, dict):
@@ -178,26 +231,36 @@ def _parse_glossary_json_str(text: str, target_lang: str) -> list[dict]:
         target = str(item.get("target", "") or "").strip()
         if not source or not target:
             continue
-        row_lang = str(item.get("tgt_lng", "") or "").strip().lower().split("-")[0]
-        if row_lang and lang_main and row_lang != lang_main:
+        row_src_lang = _first_value(item, "src_lng", "src_lang", "source_lang", "source_language")
+        row_tgt_lang = _first_value(item, "tgt_lng", "tgt_lang", "target_lang", "target_language")
+        if not _lang_matches(row_src_lang, source_lang):
+            continue
+        if not _lang_matches(row_tgt_lang, target_lang):
             continue
         level = _normalize_level(str(item.get("level", "") or ""))
-        entries.append({"source": source, "target": target, "level": level})
+        entry = {"source": source, "target": target, "level": level}
+        if row_src_lang:
+            entry["src_lng"] = row_src_lang
+        if row_tgt_lang:
+            entry["tgt_lng"] = row_tgt_lang
+        entries.append(entry)
     return entries
 
 
 def resolve_glossary_entries(
     glossary_path: Path | None,
     glossary_json: str,
+    source_lang: str,
     target_lang: str,
 ) -> list[dict]:
-    """合并术语表文件(.csv/.xlsx)与 JSON 字符串,去重。父进程 LRU 缓存。"""
+    """合并术语表文件(.csv/.xlsx)与 JSON 字符串,按 src_lng/tgt_lng 过滤并去重。"""
     entries: list[dict] = []
     if glossary_path is not None and glossary_path.exists():
         data = glossary_path.read_bytes()
         suffix = glossary_path.suffix.lower()
-        lang_main = (target_lang or "").strip().lower().split("-")[0]
-        cache_key = (hashlib.md5(data).hexdigest(), lang_main)
+        source_main = _normalize_lang_main(source_lang)
+        target_main = _normalize_lang_main(target_lang)
+        cache_key = (hashlib.md5(data).hexdigest(), source_main, target_main)
         cached = _GLOSSARY_PARSE_CACHE.get(cache_key)
         if cached is not None:
             _GLOSSARY_PARSE_CACHE.move_to_end(cache_key)
@@ -205,15 +268,18 @@ def resolve_glossary_entries(
             file_entries = cached
         else:
             if suffix == ".xlsx":
-                file_entries = _parse_glossary_xlsx(data, target_lang)
+                file_entries = _parse_glossary_xlsx(data, source_lang, target_lang)
             else:
-                file_entries = _parse_glossary_csv(data, target_lang)
+                file_entries = _parse_glossary_csv(data, source_lang, target_lang)
             _GLOSSARY_PARSE_CACHE[cache_key] = file_entries
             while len(_GLOSSARY_PARSE_CACHE) > _GLOSSARY_PARSE_CACHE_MAX:
                 _GLOSSARY_PARSE_CACHE.popitem(last=False)
-            logger.info("glossary parsed: %s entries from %s", len(file_entries), suffix.lstrip("."))
+            logger.info(
+                "glossary parsed: %s entries from %s for %s->%s",
+                len(file_entries), suffix.lstrip("."), source_main or "auto", target_main or "auto",
+            )
         entries.extend(file_entries)
-    entries.extend(_parse_glossary_json_str(glossary_json, target_lang))
+    entries.extend(_parse_glossary_json_str(glossary_json, source_lang, target_lang))
 
     seen: set[tuple[str, str]] = set()
     deduped: list[dict] = []
@@ -224,7 +290,6 @@ def resolve_glossary_entries(
         seen.add(key)
         deduped.append(e)
     return deduped
-
 
 # ---------- spec 构造 ----------
 
@@ -451,6 +516,30 @@ def _run_dual_render(
         return None, str(exc)
 
 
+def _translation_failure_summary(work_dir: Path) -> str:
+    diagnostics_path = work_dir / "artifacts" / "translation_diagnostics.json"
+    if not diagnostics_path.exists():
+        return ""
+    try:
+        diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("failed to read translation diagnostics: %s", exc)
+        return ""
+    status_summary = diagnostics.get("status_summary") or {}
+    failed = int(status_summary.get("failed") or 0)
+    partially_translated = int(status_summary.get("partially_translated") or 0)
+    if failed <= 0 and partially_translated <= 0:
+        return ""
+    error_summary = diagnostics.get("error_summary") or {}
+    samples = diagnostics.get("slow_request_samples") or []
+    sample_errors = [str(sample.get("error_class") or sample.get("status_code") or "") for sample in samples if not sample.get("success")]
+    details = [f"failed={failed}", f"partially_translated={partially_translated}"]
+    if error_summary:
+        details.append(f"error_summary={error_summary}")
+    if sample_errors:
+        details.append(f"sample_errors={sample_errors[:3]}")
+    return "; ".join(details)
+
 # ---------- 子进程跑流水线 ----------
 
 class RetainResult:
@@ -517,7 +606,7 @@ def run_retain(
 
     # 术语表
     glossary_entries = resolve_glossary_entries(
-        glossary_path, "", target_lang
+        glossary_path, "", inputs.get("lang_in") or "", target_lang
     )
 
     mode = inputs.get("mode") or settings.retain_mode
@@ -577,8 +666,9 @@ def run_retain(
         rendered_dir = work_dir / "rendered"
         classified = classify_rendered_pdfs(rendered_dir)
         result.mono_pdf = classified.get("mono")
+        failure_summary = _translation_failure_summary(work_dir) if proc.returncode == 0 else ""
 
-        if proc.returncode == 0 and result.mono_pdf:
+        if proc.returncode == 0 and result.mono_pdf and not failure_summary:
             # dual(best-effort)
             dual_pdf, _ = _run_dual_render(
                 job_root=work_dir,
@@ -599,6 +689,8 @@ def run_retain(
                 logger.exception(f"retain bilingual csv failed: {exc}")
         else:
             result.error = (
+                f"pipeline produced output but translation has failed items: {failure_summary}"
+                if failure_summary else
                 "no output pdf produced" if proc.returncode == 0
                 else f"pipeline failed (rc={proc.returncode})"
             )

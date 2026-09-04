@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from html import unescape
+from html.parser import HTMLParser
 
 from services.rendering.layout.model.models import RenderBlock
 from services.rendering.layout.inline_content.core.markdown import build_direct_typst_passthrough_text
@@ -19,6 +22,235 @@ from services.rendering.output.typst.block_markup import typst_preserved_lines_e
 from services.rendering.output.typst.block_markup import typst_single_line_fit_call
 from services.rendering.output.typst.shared import escape_typst_string
 
+
+@dataclass(frozen=True)
+class _HtmlTableCell:
+    text: str
+    colspan: int = 1
+    rowspan: int = 1
+    x: int = 0
+    y: int = 0
+
+
+class _HtmlTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[_HtmlTableCell]] = []
+        self._in_table = 0
+        self._current_row: list[_HtmlTableCell] | None = None
+        self._current_cell_attrs: dict[str, str] | None = None
+        self._current_cell_chunks: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "table":
+            self._in_table += 1
+            return
+        if self._in_table <= 0:
+            return
+        if tag == "tr":
+            if self._current_row:
+                self.rows.append(self._current_row)
+            self._current_row = []
+            return
+        if tag in {"td", "th"}:
+            self._current_cell_attrs = {name.lower(): str(value or "") for name, value in attrs}
+            self._current_cell_chunks = []
+            return
+        if tag in {"br", "p", "div", "li"} and self._current_cell_chunks is not None:
+            if self._current_cell_chunks and self._current_cell_chunks[-1] != "\n":
+                self._current_cell_chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell_chunks is not None:
+            self._current_cell_chunks.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"td", "th"} and self._current_cell_chunks is not None:
+            attrs = self._current_cell_attrs or {}
+            cell = _HtmlTableCell(
+                text=_normalize_table_cell_text("".join(self._current_cell_chunks)),
+                colspan=_positive_span(attrs.get("colspan")),
+                rowspan=_positive_span(attrs.get("rowspan")),
+            )
+            if self._current_row is None:
+                self._current_row = []
+            self._current_row.append(cell)
+            self._current_cell_attrs = None
+            self._current_cell_chunks = None
+            return
+        if tag == "tr":
+            if self._current_row is not None:
+                self.rows.append(self._current_row)
+            self._current_row = None
+            return
+        if tag in {"p", "div", "li"} and self._current_cell_chunks is not None:
+            if self._current_cell_chunks and self._current_cell_chunks[-1] != "\n":
+                self._current_cell_chunks.append("\n")
+            return
+        if tag == "table" and self._in_table > 0:
+            self._in_table -= 1
+
+
+_TABLE_HTML_RE = re.compile(r"<table\b.*?</table>", re.IGNORECASE | re.DOTALL)
+_TABLE_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _positive_span(value: str | None) -> int:
+    try:
+        return max(1, int(str(value or "1").strip()))
+    except Exception:
+        return 1
+
+
+def _normalize_table_cell_text(text: str) -> str:
+    value = unescape(str(text or ""))
+    value = re.sub(r"[ \t\r\f\v]+", " ", value)
+    value = re.sub(r"\n\s*", "\n", value)
+    return value.strip()
+
+
+def _parse_html_table(markdown: str) -> list[list[_HtmlTableCell]]:
+    match = _TABLE_HTML_RE.search(str(markdown or ""))
+    if not match:
+        return []
+    parser = _HtmlTableParser()
+    try:
+        parser.feed(match.group(0))
+        parser.close()
+    except Exception:
+        return []
+    if parser._current_row:
+        parser.rows.append(parser._current_row)
+    # Empty HTML rows are meaningful in forms: they reserve handwriting space.
+    return parser.rows
+
+
+def _layout_table_cells(rows: list[list[_HtmlTableCell]]) -> tuple[list[_HtmlTableCell], int]:
+    """Assign explicit grid coordinates so rowspan does not shift later cells."""
+    active_rowspans: dict[int, int] = {}
+    positioned: list[_HtmlTableCell] = []
+    column_count = 0
+    for row_index, row in enumerate(rows):
+        column_index = 0
+        for cell in row:
+            while active_rowspans.get(column_index, 0) > 0:
+                column_index += 1
+            placed = _HtmlTableCell(
+                text=cell.text,
+                colspan=cell.colspan,
+                rowspan=cell.rowspan,
+                x=column_index,
+                y=row_index,
+            )
+            positioned.append(placed)
+            for occupied_column in range(column_index, column_index + cell.colspan):
+                active_rowspans[occupied_column] = max(active_rowspans.get(occupied_column, 0), cell.rowspan)
+            column_index += cell.colspan
+            column_count = max(column_count, column_index)
+        if active_rowspans:
+            column_count = max(column_count, max(active_rowspans) + 1)
+        active_rowspans = {
+            column: remaining - 1
+            for column, remaining in active_rowspans.items()
+            if remaining > 1
+        }
+    return positioned, column_count
+
+
+def _table_cell_expr(cell: _HtmlTableCell, cell_name: str) -> str:
+    return (
+        f"table.cell(x: {cell.x}, y: {cell.y}, colspan: {cell.colspan}, rowspan: {cell.rowspan}, "
+        "inset: (x: 1.8pt, y: 1.6pt), align: left + top)"
+        f"[#{{ cmarker.render({cell_name}, math: mitex) }}]"
+    )
+
+
+def _table_row_tracks(rows: list[list[_HtmlTableCell]], height_pt: float) -> str | None:
+    """Give intentionally empty form rows visible, bounded writing space."""
+    empty_rows = [index for index, row in enumerate(rows) if not any(cell.text for cell in row)]
+    if not empty_rows:
+        return None
+    row_count = max(1, len(rows))
+    row_height = min(
+        10.0,
+        max(6.5, min(float(height_pt) * 0.35 / len(empty_rows), float(height_pt) / row_count * 0.72)),
+    )
+    tracks = [f"{row_height:.2f}pt" if index in empty_rows else "auto" for index in range(row_count)]
+    return "(" + ", ".join(tracks) + ("," if len(tracks) == 1 else "") + ")"
+
+
+def _html_table_fallback_text(markdown: str) -> str:
+    """Do not let malformed provider HTML leak tags into the output PDF."""
+    text = str(markdown or "")
+    text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/?\s*(tr|p|div|li)\b[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<\s*/?\s*(td|th)\b[^>]*>", "  ", text, flags=re.IGNORECASE)
+    text = _TABLE_TAG_RE.sub("", text)
+    text = unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+
+def _build_html_table_typst_block(
+    block_id: str,
+    fields,
+    markdown: str,
+    *,
+    text_fill: str,
+    block_fill: str,
+) -> str | None:
+    rows = _parse_html_table(markdown)
+    cells, col_count = _layout_table_cells(rows)
+    if not rows or not cells or col_count <= 0:
+        return None
+    prefix = fields.var_prefix
+    body_name = f"{prefix}_table_body"
+    row_count = max(1, len(rows))
+    row_tracks = _table_row_tracks(rows, float(fields.height or 0))
+    max_font_pt = round(
+        max(2.8, min(float(fields.font_size or 0), float(fields.height or 0) / max(row_count * 1.35, 1.0))),
+        2,
+    )
+    min_font_pt = round(max(2.6, min(max_font_pt, 4.2)), 2)
+    columns = "(" + ", ".join("1fr" for _ in range(col_count)) + ("," if col_count == 1 else "") + ")"
+    parts: list[str] = []
+    cell_exprs: list[str] = []
+    for cell_index, cell in enumerate(cells):
+        cell_name = f"{prefix}_cell_{cell_index}"
+        cell_markdown = sanitize_typst_markdown_for_compile(cell.text)
+        parts.append(f'#let {cell_name} = "{escape_typst_string(cell_markdown)}"')
+        cell_exprs.append(_table_cell_expr(cell, cell_name))
+    joined_cells = ",\n        ".join(cell_exprs)
+    parts.extend(
+        [
+            f"#let {body_name} = block(width: {fields.width}pt, height: {fields.height}pt{block_fill})[#{{",
+            "  layout(size => {",
+            "    let render-table = font-size => {",
+            f"      set text(size: font-size, weight: \"{fields.font_weight}\", fill: {text_fill});",
+            "      set par(leading: 0.88em, justify: false);",
+            "      table(",
+            f"        columns: {columns},",
+            *([f"        rows: {row_tracks},"] if row_tracks else []),
+            "        stroke: 0.45pt + black,",
+            "        gutter: 0pt,",
+            f"        {joined_cells}",
+            "      )",
+            "    }",
+            "    let fits = font-size => measure(width: size.width, render-table(font-size)).height <= size.height",
+            f"    let chosen-size = if fits({max_font_pt}pt) {{ {max_font_pt}pt }} else if not fits({min_font_pt}pt) {{ {min_font_pt}pt }} else {{",
+            f"      pdftr_fit_size({min_font_pt}pt, {max_font_pt}pt, 0.08pt, font-size => fits(font-size))",
+            "    }",
+            "    box(width: size.width, height: size.height, clip: true)[#{ render-table(chosen-size) }]",
+            "  })",
+            "}]",
+            typst_place_context(x_pt=fields.x0, y_pt=fields.y0, body_name=body_name).rstrip(),
+        ]
+    )
+    return "\n".join(parts) + "\n"
+
 PLAIN_LINE_FIT_MAX_CHARS = 40
 TOC_ENTRY_FONT_PT = 9.6
 TOC_ENTRY_MIN_FONT_PT = 6.8
@@ -26,8 +258,6 @@ TOC_PAGE_COLUMN_MIN_PT = 20.0
 TOC_PAGE_COLUMN_MAX_PT = 36.0
 TOC_TITLE_PAGE_GAP_PT = 4.0
 TOC_LEADER_DOT_WIDTH_RATIO = 0.26
-
-
 def _toc_text_units(text: str) -> float:
     units = 0.0
     for char in str(text or ""):
@@ -62,6 +292,8 @@ def _toc_estimated_text_width_pt(text: str, font_size_pt: float) -> float:
 
 def sanitize_typst_markdown_for_compile(markdown: str) -> str:
     text = str(markdown or "")
+    if "<table" in text.lower():
+        text = _html_table_fallback_text(text)
     text = re.sub(r"\$\s*\^\s*\{\s*\\(?:circled|textcircled)\s*R\s*\}\s*\$", "®", text)
     text = re.sub(r"\$\s*\^\s*\{\s*\\(?:circled|textcircled)\s*\{\s*R\s*\}\s*\}\s*\$", "®", text)
     text = re.sub(r"\$\s*\^\s*\{\s*\\(?:textregistered|registered)\s*\}\s*\$", "®", text)
@@ -246,6 +478,11 @@ def build_typst_block(block_id: str, block: RenderBlock, *, include_fill: bool =
     content_fit_height = max(typst_config.MIN_BLOCK_SIZE_PT, fields.height - formula_insets.total_pt)
     first_line_indent = typst_config.first_line_indent_pt(block.first_line_indent_pt)
     justify_text = typst_config.typst_bool(block.justify_text and not long_inline_math_risk)
+    table_block = _build_html_table_typst_block(
+        block_id, fields, block.markdown_text, text_fill=text_fill, block_fill=block_fill
+    )
+    if table_block is not None:
+        return table_block
     if block.toc_entries:
         return _build_toc_entry_typst(block_id, block, text_fill=text_fill)
     if block.preserve_line_breaks and block.preserved_line_boxes:

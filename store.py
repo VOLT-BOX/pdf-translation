@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import shutil
 import threading
 import time
@@ -26,6 +27,33 @@ logger = logging.getLogger("unified.service")
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
+
+
+_TRANSLATED_PAGE_RE = re.compile(r"page-(\d+)-.*\.json$")
+
+
+def _count_retain_translated_pages(work_dir: str | Path) -> int:
+    translated_dir = Path(work_dir) / "retain_work" / "translated"
+    if not translated_dir.exists():
+        return 0
+    pages: set[int] = set()
+    for path in translated_dir.glob("page-*.json"):
+        match = _TRANSLATED_PAGE_RE.match(path.name)
+        if match:
+            pages.add(int(match.group(1)))
+    return len(pages)
+
+
+def _page_stage_text(status: str, translated_pages: int, total_pages: int) -> str:
+    if total_pages <= 0:
+        return ""
+    if status == "succeeded":
+        return f"翻译完成: {total_pages} / {total_pages} 页"
+    if status == "failed":
+        return f"翻译失败: {translated_pages} / {total_pages} 页"
+    if translated_pages > 0:
+        return f"正在翻译: {translated_pages} / {total_pages} 页"
+    return f"等待翻译: 0 / {total_pages} 页"
 
 
 # ---------------- 任务存储 ----------------
@@ -86,15 +114,32 @@ class TaskStore:
             if t is None:
                 return {}
         inputs: dict = t.get("inputs", {})
+        status = str(t.get("status", "pending") or "pending")
+        total_pages = int(t.get("total_pages") or 0)
+        translated_pages = int(t.get("translated_pages") or 0)
+        if status == "succeeded" and total_pages > 0:
+            translated_pages = total_pages
+        else:
+            translated_pages = max(translated_pages, _count_retain_translated_pages(t.get("work_dir", "")))
+            if total_pages > 0:
+                translated_pages = min(translated_pages, total_pages)
+        page_progress = round((translated_pages / total_pages) * 100, 1) if total_pages > 0 else 0.0
+        progress = max(float(t.get("progress") or 0.0), page_progress)
+        if status == "succeeded":
+            progress = 100.0
         return {
             "task_id": t["task_id"],
             "kind": t.get("kind", "pdf"),
-            "status": t.get("status", "pending"),
+            "status": status,
             "original_filename": t.get("original_filename"),
             "created_at": t.get("created_at"),
             "started_at": t.get("started_at"),
             "finished_at": t.get("finished_at"),
-            "progress": round(float(t.get("progress") or 0.0), 1),
+            "progress": round(progress, 1),
+            "translated_pages": translated_pages,
+            "total_pages": total_pages,
+            "page_progress": page_progress,
+            "stage_text": _page_stage_text(status, translated_pages, total_pages),
             "stage": t.get("stage", ""),
             "decision": t.get("decision", ""),
             "sub_tasks": t.get("sub_tasks", {}),
@@ -107,6 +152,9 @@ class TaskStore:
             "concurrency": inputs.get("concurrency", 4),
             "custom_system_prompt": inputs.get("custom_system_prompt"),
             "glossary_hard": inputs.get("glossary_hard", False),
+            "text_based": inputs.get("text_based", False),
+            "enable_table_translation": inputs.get("enable_table_translation", False),
+            "has_glossary": bool(t.get("glossary_path")),
         }
 
     def delete(self, task_id: str) -> bool:

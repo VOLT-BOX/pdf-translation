@@ -14,13 +14,23 @@ logger = logging.getLogger(__name__)
 
 
 class GlossaryEntry:
-    def __init__(self, source: str, target: str, target_language: str | None = None):
+    def __init__(
+        self,
+        source: str,
+        target: str,
+        target_language: str | None = None,
+        source_language: str | None = None,
+    ):
         self.source = source
         self.target = target
         self.target_language = target_language
+        self.source_language = source_language
 
     def __repr__(self):
-        return f"GlossaryEntry(source='{self.source}', target='{self.target}', target_language='{self.target_language}')"
+        return (
+            f"GlossaryEntry(source='{self.source}', target='{self.target}', "
+            f"target_language='{self.target_language}', source_language='{self.source_language}')"
+        )
 
 
 def batched(iterable, n, *, strict=False):
@@ -36,6 +46,44 @@ def batched(iterable, n, *, strict=False):
 
 TERM_NORM_PATTERN = re.compile(r"\s+", regex.UNICODE)
 
+def _normalize_lang_main(value: str | None) -> str:
+    lang = (value or "").strip().lower().replace("_", "-")
+    if not lang or lang == "auto":
+        return ""
+    return lang.split("-", 1)[0]
+
+
+def _lang_matches(row_lang: str | None, requested_lang: str | None) -> bool:
+    row_main = _normalize_lang_main(row_lang)
+    if not row_main:
+        return True
+    requested_main = _normalize_lang_main(requested_lang)
+    if not requested_main:
+        return True
+    return row_main == requested_main
+
+
+def _first_value(mapping: dict, *names: str) -> str:
+    for name in names:
+        value = mapping.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _optional_column(col: dict[str, int], *names: str) -> int | None:
+    for name in names:
+        idx = col.get(name)
+        if idx is not None:
+            return idx
+    return None
+
+
+def _row_cell(row: tuple, idx: int | None) -> str:
+    if idx is None or idx >= len(row):
+        return ""
+    value = row[idx]
+    return str(value).strip() if value is not None else ""
 
 class Glossary:
     def __init__(self, name: str, entries: list[GlossaryEntry]):
@@ -121,12 +169,13 @@ class Glossary:
             self.hs_dbs = None
 
     @classmethod
-    def from_xlsx(cls, file_path: Path, target_lang_out: str) -> "Glossary":
-        """从 xlsx 加载术语表。
-
-        首行须为表头，至少含 source、target 两列（tgt_lng 可选，与 CSV 一致）。
-        需要安装 openpyxl；未装则抛 ImportError 并提示。
-        """
+    def from_xlsx(
+        cls,
+        file_path: Path,
+        target_lang_out: str,
+        source_lang_in: str | None = None,
+    ) -> "Glossary":
+        """从 xlsx 加载术语表。首行至少含 source、target；src_lng/tgt_lng 可选。"""
         try:
             import openpyxl
         except ImportError as e:  # noqa: BLE001
@@ -135,7 +184,6 @@ class Glossary:
             ) from e
 
         glossary_name = file_path.stem
-        normalized_target_lang_out = target_lang_out.lower().replace("-", "_")
         loaded_entries: list[GlossaryEntry] = []
 
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
@@ -151,55 +199,60 @@ class Glossary:
                 f"xlsx 文件 {file_path} 表头须含 source、target 列，实际: {header}"
             )
         col = {name: i for i, name in enumerate(header)}
-        tgt_lng_idx = col.get("tgt_lng")
+        src_lng_idx = _optional_column(col, "src_lng", "src_lang", "source_lang", "source_language")
+        tgt_lng_idx = _optional_column(col, "tgt_lng", "tgt_lang", "target_lang", "target_language")
 
         for row in rows:
-            source = row[col["source"]]
-            target = row[col["target"]]
+            source = row[col["source"]] if col["source"] < len(row) else None
+            target = row[col["target"]] if col["target"] < len(row) else None
             if source is None or target is None:
                 continue
             source = str(source).strip()
             target = str(target).strip()
             if not source or not target:
                 continue
-            tgt_lng = None
-            if tgt_lng_idx is not None:
-                raw = row[tgt_lng_idx]
-                tgt_lng = str(raw).strip() if raw is not None else ""
-                if tgt_lng:
-                    normalized_entry_tgt_lng = tgt_lng.lower().replace("-", "_")
-                    if normalized_entry_tgt_lng != normalized_target_lang_out:
-                        continue
-            loaded_entries.append(GlossaryEntry(source, target, tgt_lng))
+            src_lng = _row_cell(row, src_lng_idx)
+            tgt_lng = _row_cell(row, tgt_lng_idx)
+            if not _lang_matches(src_lng, source_lang_in):
+                continue
+            if not _lang_matches(tgt_lng, target_lang_out):
+                continue
+            loaded_entries.append(GlossaryEntry(source, target, tgt_lng or None, src_lng or None))
         wb.close()
         return cls(name=glossary_name, entries=loaded_entries)
 
     @classmethod
-    def from_file(cls, file_path: Path, target_lang_out: str) -> "Glossary":
+    def from_file(
+        cls,
+        file_path: Path,
+        target_lang_out: str,
+        source_lang_in: str | None = None,
+    ) -> "Glossary":
         """按扩展名自动分发：.xlsx 走 from_xlsx，其余（csv/txt）走 from_csv。"""
         suffix = file_path.suffix.lower()
         if suffix == ".xlsx":
-            return cls.from_xlsx(file_path, target_lang_out)
-        return cls.from_csv(file_path, target_lang_out)
+            return cls.from_xlsx(file_path, target_lang_out, source_lang_in)
+        return cls.from_csv(file_path, target_lang_out, source_lang_in)
 
     @classmethod
-    def from_csv(cls, file_path: Path, target_lang_out: str) -> "Glossary":
+    def from_csv(
+        cls,
+        file_path: Path,
+        target_lang_out: str,
+        source_lang_in: str | None = None,
+    ) -> "Glossary":
         """
         Loads glossary entries from a CSV file.
-        CSV format: source,target,tgt_lng (tgt_lng is optional)
-        Filters entries based on tgt_lng matching target_lang_out.
-        The glossary name is derived from the CSV filename.
+        CSV format: source,target,src_lng,tgt_lng (language columns are optional).
+        Empty language columns mean the entry is reusable for any matching side.
         """
         glossary_name = file_path.stem
         loaded_entries: list[GlossaryEntry] = []
 
-        # Normalize target_lang_out once for comparison
-        normalized_target_lang_out = target_lang_out.lower().replace("-", "_")
-
         try:
             with file_path.open("rb") as f:
                 content = f.read()
-                encoding = chardet.detect(content)["encoding"]
+                encoding = chardet.detect(content)["encoding"] or "utf-8"
                 buffer = io.StringIO(content.decode(encoding))
                 reader = csv.DictReader(buffer, doublequote=True)
                 if not all(col in reader.fieldnames for col in ["source", "target"]):
@@ -208,42 +261,39 @@ class Glossary:
                     )
 
                 for row in reader:
-                    source = row["source"]
-                    target = row["target"]
-                    tgt_lng = row.get("tgt_lng", None)  # Handle optional tgt_lng
-
-                    if tgt_lng and tgt_lng.strip():
-                        normalized_entry_tgt_lng = (
-                            tgt_lng.strip().lower().replace("-", "_")
-                        )
-                        if normalized_entry_tgt_lng != normalized_target_lang_out:
-                            continue  # Skip if language doesn't match
-
-                    loaded_entries.append(GlossaryEntry(source, target, tgt_lng))
+                    source = (row.get("source") or "").strip()
+                    target = (row.get("target") or "").strip()
+                    if not source or not target:
+                        continue
+                    src_lng = _first_value(row, "src_lng", "src_lang", "source_lang", "source_language")
+                    tgt_lng = _first_value(row, "tgt_lng", "tgt_lang", "target_lang", "target_language")
+                    if not _lang_matches(src_lng, source_lang_in):
+                        continue
+                    if not _lang_matches(tgt_lng, target_lang_out):
+                        continue
+                    loaded_entries.append(GlossaryEntry(source, target, tgt_lng or None, src_lng or None))
         except FileNotFoundError:
-            # Or handle as per your project's error strategy, e.g., log and return empty Glossary
             raise
         except Exception as e:
-            # Or handle as per your project's error strategy
             raise ValueError(
                 f"Error reading or parsing CSV file {file_path}: {e}"
             ) from e
 
         return cls(name=glossary_name, entries=loaded_entries)
-
     def to_csv(self) -> str:
         """Exports the glossary entries to a CSV formatted string."""
         dict_data = [
             {
                 "source": x.source,
                 "target": x.target,
+                "src_lng": x.source_language if x.source_language else "",
                 "tgt_lng": x.target_language if x.target_language else "",
             }
             for x in self.entries
         ]
         buffer = io.StringIO()
         dict_writer = csv.DictWriter(
-            buffer, fieldnames=["source", "target", "tgt_lng"], doublequote=True
+            buffer, fieldnames=["source", "target", "src_lng", "tgt_lng"], doublequote=True
         )
         dict_writer.writeheader()
         dict_writer.writerows(dict_data)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from services.document_schema.provider_adapters.common import NormalizedBlockSpec
@@ -18,6 +19,30 @@ from services.document_schema.toc import build_toc_entries
 from services.document_schema.provider_adapters.paddle.trace import build_derived
 from services.document_schema.provider_adapters.paddle.trace import build_metadata
 from services.document_schema.provider_adapters.paddle.trace import build_source
+_TABLE_HTML_RE = re.compile(r"<table\b.*?</table>", re.IGNORECASE | re.DOTALL)
+
+
+def _table_plain_text(text: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", " ", str(text or ""))
+    return re.sub(r"\s+", " ", without_tags).strip()
+
+
+def _rich_table_html_from_markdown(*, raw_label: str, text: str, markdown_text: str) -> str:
+    if raw_label.strip().lower() != "table" or "<table" not in str(text or "").lower():
+        return text
+    tables = [match.group(0).strip() for match in _TABLE_HTML_RE.finditer(markdown_text or "")]
+    if not tables:
+        return text
+    plain = _table_plain_text(text)
+    if not plain:
+        return text
+    probe = plain[: min(len(plain), 120)]
+    for table_html in tables:
+        if probe and probe in _table_plain_text(table_html):
+            return table_html
+    if len(tables) == 1:
+        return tables[0]
+    return text
 
 
 @dataclass(frozen=True)
@@ -180,6 +205,11 @@ def build_block_context(*, page_context: PaddlePageContext, order: int) -> Paddl
     raw_label = str(block.get("block_label", "") or "")
     bbox = normalize_bbox(block.get("block_bbox"))
     text = str(block.get("block_content", "") or "").strip()
+    text = _rich_table_html_from_markdown(
+        raw_label=raw_label,
+        text=text,
+        markdown_text=page_context.get("markdown_text", ""),
+    )
     return {
         "page": page_context,
         "block": block,
