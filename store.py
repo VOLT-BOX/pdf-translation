@@ -9,6 +9,7 @@ worker 队列(单线程串行):混合件内部两引擎并行,但一次只处理
 """
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import re
@@ -30,6 +31,12 @@ def _now_iso() -> str:
 
 
 _TRANSLATED_PAGE_RE = re.compile(r"page-(\d+)-.*\.json$")
+_PIPELINE_EVENTS_FILE_NAME = "pipeline_events.jsonl"
+_PROGRESS_UNIT_LABELS = {
+    "page": "页",
+    "batch": "批",
+    "step": "步",
+}
 
 
 def _count_retain_translated_pages(work_dir: str | Path) -> int:
@@ -42,6 +49,67 @@ def _count_retain_translated_pages(work_dir: str | Path) -> int:
         if match:
             pages.add(int(match.group(1)))
     return len(pages)
+
+
+def _coerce_int(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_retain_pipeline_event(work_dir: str | Path) -> dict[str, Any]:
+    events_path = Path(work_dir) / "retain_work" / "logs" / _PIPELINE_EVENTS_FILE_NAME
+    if not events_path.exists():
+        return {}
+    try:
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for line in reversed(lines[-300:]):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        message = str(record.get("message") or record.get("stage_detail") or "").strip()
+        stage = str(record.get("stage") or "").strip()
+        user_stage = str(record.get("user_stage") or "").strip()
+        if not message and not stage and not user_stage:
+            continue
+        current = _coerce_int(record.get("progress_current"))
+        total = _coerce_int(record.get("progress_total"))
+        percent = round((current / total) * 100, 1) if current is not None and total and total > 0 else None
+        return {
+            "seq": record.get("seq"),
+            "created_at": record.get("created_at") or record.get("ts"),
+            "user_stage": user_stage,
+            "stage": stage,
+            "substage": str(record.get("substage") or "").strip(),
+            "stage_detail": str(record.get("stage_detail") or "").strip(),
+            "message": message,
+            "progress_current": current,
+            "progress_total": total,
+            "progress_unit": str(record.get("progress_unit") or "").strip(),
+            "progress_percent": percent,
+        }
+    return {}
+
+
+def _event_stage_text(event: dict[str, Any], fallback: str) -> str:
+    message = str(event.get("message") or event.get("stage_detail") or "").strip()
+    if not message:
+        return fallback
+    current = event.get("progress_current")
+    total = event.get("progress_total")
+    unit = _PROGRESS_UNIT_LABELS.get(str(event.get("progress_unit") or "").strip(), "")
+    if current is not None and total and total > 0:
+        suffix = f" {unit}" if unit else ""
+        return f"{message}: {current} / {total}{suffix}"
+    return message
 
 
 def _page_stage_text(status: str, translated_pages: int, total_pages: int) -> str:
@@ -117,6 +185,7 @@ class TaskStore:
         status = str(t.get("status", "pending") or "pending")
         total_pages = int(t.get("total_pages") or 0)
         translated_pages = int(t.get("translated_pages") or 0)
+        pipeline_event = _latest_retain_pipeline_event(t.get("work_dir", ""))
         if status == "succeeded" and total_pages > 0:
             translated_pages = total_pages
         else:
@@ -125,8 +194,15 @@ class TaskStore:
                 translated_pages = min(translated_pages, total_pages)
         page_progress = round((translated_pages / total_pages) * 100, 1) if total_pages > 0 else 0.0
         progress = max(float(t.get("progress") or 0.0), page_progress)
+        retain_progress = float(t.get("retain_progress") or 0.0)
+        v3_progress = float(t.get("v3_progress") or 0.0)
+        progress = max(progress, retain_progress, v3_progress)
         if status == "succeeded":
             progress = 100.0
+        fallback_stage_text = _page_stage_text(status, translated_pages, total_pages)
+        stage_text = fallback_stage_text
+        if status in {"pending", "running"}:
+            stage_text = _event_stage_text(pipeline_event, fallback_stage_text)
         return {
             "task_id": t["task_id"],
             "kind": t.get("kind", "pdf"),
@@ -139,8 +215,19 @@ class TaskStore:
             "translated_pages": translated_pages,
             "total_pages": total_pages,
             "page_progress": page_progress,
-            "stage_text": _page_stage_text(status, translated_pages, total_pages),
+            "stage_text": stage_text,
             "stage": t.get("stage", ""),
+            "retain_progress": round(retain_progress, 1),
+            "v3_progress": round(v3_progress, 1),
+            "pipeline_stage": pipeline_event.get("stage", ""),
+            "pipeline_user_stage": pipeline_event.get("user_stage", ""),
+            "pipeline_substage": pipeline_event.get("substage", ""),
+            "pipeline_stage_detail": pipeline_event.get("stage_detail", ""),
+            "pipeline_message": pipeline_event.get("message", ""),
+            "pipeline_progress_current": pipeline_event.get("progress_current"),
+            "pipeline_progress_total": pipeline_event.get("progress_total"),
+            "pipeline_progress_unit": pipeline_event.get("progress_unit", ""),
+            "pipeline_progress_percent": pipeline_event.get("progress_percent"),
             "decision": t.get("decision", ""),
             "sub_tasks": t.get("sub_tasks", {}),
             "result_files": t.get("result_files", []),
@@ -150,6 +237,8 @@ class TaskStore:
             "lang_in": inputs.get("lang_in", "en"),
             "lang_out": inputs.get("lang_out", "zh"),
             "concurrency": inputs.get("concurrency", 4),
+            "ocr_provider": inputs.get("ocr_provider"),
+            "paddle_api_url": inputs.get("paddle_api_url"),
             "custom_system_prompt": inputs.get("custom_system_prompt"),
             "glossary_hard": inputs.get("glossary_hard", False),
             "text_based": inputs.get("text_based", False),

@@ -33,6 +33,7 @@ Copy-Item .env.example .env
 LLM_API_KEY=your_api_key
 LLM_MODEL=your_model_name
 LLM_BASE_URL=https://your-api-base-url/v1
+RETAIN_OCR_PROVIDER=cloud
 RETAIN_PADDLE_TOKEN=your_paddle_ocr_token
 PORT=8040
 ```
@@ -44,7 +45,10 @@ PORT=8040
 | `LLM_API_KEY` | 是 | 大模型 API Key。不要提交到 GitHub。 |
 | `LLM_MODEL` | 是 | 翻译使用的模型名称。 |
 | `LLM_BASE_URL` | 是 | OpenAI 兼容接口地址。 |
-| `RETAIN_PADDLE_TOKEN` | 视情况 | 扫描件/OCR 场景需要。只翻译带文字层的 PDF 时可不填。 |
+| `RETAIN_OCR_PROVIDER` | 否 | OCR 来源，默认 `cloud`。可选 `cloud`、`local`。 |
+| `RETAIN_PADDLE_TOKEN` | 视情况 | `RETAIN_OCR_PROVIDER=cloud` 且处理扫描件/OCR 场景时需要。 |
+| `RETAIN_PADDLE_API_URL` | 否 | 云端 PaddleOCR API 地址覆盖项，通常留空。 |
+| `RETAIN_LOCAL_OCR_URL` | 视情况 | `RETAIN_OCR_PROVIDER=local` 时使用，默认 `http://host.docker.internal:8080`。 |
 | `PORT` | 否 | 服务端口，默认 `8040`。 |
 | `WORK_ROOT` | 否 | 容器内工作目录，默认 `/data`。 |
 | `RETENTION_SECONDS` | 否 | 结果文件保留时间，默认 `3600` 秒。 |
@@ -71,6 +75,147 @@ http://localhost:8040/docs
 ```
 
 如果部署在服务器上，把 `localhost` 换成服务器 IP 或域名即可。
+
+## OCR 来源选择
+
+扫描件、图片型 PDF 和图片翻译会走 OCR。项目支持在 `.env` 中设置默认 OCR，也支持创建任务时临时覆盖。对外只需要理解两个选项：`cloud` 表示云端 PaddleOCR，`local` 表示本地部署 OCR。
+
+### 使用云端 PaddleOCR
+
+`.env` 中保持：
+
+```env
+RETAIN_OCR_PROVIDER=cloud
+RETAIN_PADDLE_TOKEN=your_paddle_ocr_token
+```
+
+`RETAIN_PADDLE_API_URL` 和 `RETAIN_PADDLE_MODEL` 都有默认值，正常不用填。
+
+创建任务时不传 `ocr_provider`，就会使用 `.env` 默认配置。也可以在请求里临时指定：
+
+```bash
+curl -X POST http://localhost:8040/tasks \
+  -F "file=@example.pdf" \
+  -F "lang_in=es" \
+  -F "lang_out=zh" \
+  -F "text_based=false" \
+  -F "ocr_provider=cloud"
+```
+
+### 使用本地 PaddleOCR-VL
+
+先单独启动 PaddleOCR-VL 的 PaddleX 服务，例如：
+
+```bash
+docker run -d \
+  --name paddleocr-vl \
+  --gpus all \
+  --network host \
+  --user root \
+  ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:latest-nvidia-gpu-sm120 \
+  bash -lc "paddlex --serve --pipeline PaddleOCR-VL --host 0.0.0.0 --port 8080"
+```
+
+确认服务可访问：
+
+```bash
+curl http://127.0.0.1:8080/docs
+```
+
+`.env` 中改为：
+
+```env
+RETAIN_OCR_PROVIDER=local
+RETAIN_LOCAL_OCR_URL=http://host.docker.internal:8080
+```
+
+本地模式默认调用 PaddleX 的 `/layout-parsing` 接口，返回结果会继续走项目内置的 Paddle adapter，因此可以保留更细的版面、表格和坐标结构。
+
+Linux 服务器 Docker 场景下，`docker-compose.yml` 已配置：
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+如果主服务容器仍访问不到宿主机 PaddleX 服务，可以把 `RETAIN_LOCAL_OCR_URL` 改成宿主机网关 IP，例如：
+
+```env
+RETAIN_LOCAL_OCR_URL=http://172.17.0.1:8080
+```
+
+也可以单次请求临时选择本地 OCR：
+
+```bash
+curl -X POST http://localhost:8040/tasks \
+  -F "file=@example.pdf" \
+  -F "lang_in=es" \
+  -F "lang_out=zh" \
+  -F "text_based=false" \
+  -F "ocr_provider=local"
+```
+
+本地接入默认通过 `local_ocr/paddlex_paddleocr.py` 调用本机 PaddleX 服务。它会把 PDF 以 Base64 发送到 `/layout-parsing`，保存 PaddleOCR-VL 的结构化结果，再交给项目内置 Paddle adapter 转成统一 OCR 格式，后续翻译和渲染流程保持一致。
+
+PaddleOCR-VL 有时会把带文字的截图识别成一个 `image` 大块。项目默认开启 `RETAIN_PADDLE_IMAGE_REOCR=1`，会把这类图片块裁剪成临时单页 PDF 再做一次 OCR；只有二次 OCR 拆出更细的文本或表格块时，才会替换原来的大图片块。这样可以继续复用原坐标回填流程，同时避免把整张截图盖成大白块。需要控制耗时或云端调用次数时，可以设置：
+
+```env
+RETAIN_PADDLE_IMAGE_REOCR=0
+RETAIN_PADDLE_IMAGE_REOCR_MAX_BLOCKS=6
+```
+
+兼容说明：旧参数值 `paddle` 等同于 `cloud`，但新部署建议统一使用 `cloud/local`。
+
+### 对比 OCR 结构化结果
+
+可以用同一份 PDF 分别跑 `cloud` 和 `local` 两个任务，然后对比两个任务目录里的 OCR 结果：
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+task_ids = ["云端任务ID", "本地任务ID"]
+for task_id in task_ids:
+    root = Path("data") / task_id / "retain_work" / "ocr"
+    normalized = root / "normalized" / "document.v1.json"
+    raw = root / "result.json"
+    print("\n====", task_id, "====")
+    print("raw exists:", raw.exists(), raw)
+    print("normalized exists:", normalized.exists(), normalized)
+    if not normalized.exists():
+        continue
+    doc = json.loads(normalized.read_text(encoding="utf-8"))
+    pages = doc.get("pages") or []
+    blocks = [b for p in pages for b in (p.get("blocks") or [])]
+    table_blocks = [
+        b for b in blocks
+        if "table" in str(b.get("type", "")).lower()
+        or "table" in str(b.get("sub_type", "")).lower()
+        or "table" in str((b.get("content") or {}).get("kind", "")).lower()
+        or "<table" in str(b.get("text", "")).lower()
+    ]
+    with_bbox = sum(1 for b in blocks if len(b.get("bbox") or []) == 4)
+    with_lines = sum(1 for b in blocks if b.get("lines"))
+    with_segments = sum(1 for b in blocks if b.get("segments"))
+    print("pages:", len(pages))
+    print("blocks:", len(blocks))
+    print("table_blocks:", len(table_blocks))
+    print("blocks_with_bbox:", with_bbox)
+    print("blocks_with_lines:", with_lines)
+    print("blocks_with_segments:", with_segments)
+    for b in table_blocks[:3]:
+        print("table sample:", {
+            "id": b.get("block_id"),
+            "type": b.get("type"),
+            "sub_type": b.get("sub_type"),
+            "bbox": b.get("bbox"),
+            "text_head": str(b.get("text", ""))[:120],
+        })
+PY
+```
+
+如果本地结果只有很少的大块正文，`table_blocks=0`，或者所有文字都在一个整页 `bbox` 里，说明本地 OCR 没有返回和云端一样细的版面、表格、坐标结构。它仍然可以翻译正文，但复杂表格和原坐标回填效果会弱很多。
 
 ## 修改部署端口
 
@@ -308,13 +453,15 @@ curl -X POST http://localhost:8040/normalize \
 | `openai_api_key` | 空 | 可在请求里临时传入，也可以使用 `.env` 里的 `LLM_API_KEY`。 |
 | `openai_model` | 空 | 可在请求里临时指定模型。 |
 | `openai_base_url` | 空 | 可在请求里临时指定模型接口地址。 |
+| `ocr_provider` | 空 | 可临时指定 OCR 来源：`cloud`、`local`。为空时使用 `.env` 的 `RETAIN_OCR_PROVIDER`。 |
+| `paddle_api_url` | 空 | 可临时指定云端 PaddleOCR API 地址。 |
 | `paddle_token` | 空 | 可在请求里临时传入 OCR token。 |
 | `glossary` | 空 | 可选术语表文件，支持 CSV/XLSX。 |
 | `glossary_hard` | `false` | 对命中的术语启用占位符硬约束；只作用于成功匹配的 source。 |
 | `callback_url` | 空 | 任务完成后的回调地址。 |
 | `enable_table_translation` | `false` | 是否翻译表格内容。 |
 
-通常只需要传 `file`、`lang_in`、`lang_out`、`text_based`。模型密钥建议统一放在 `.env` 中。
+通常只需要传 `file`、`lang_in`、`lang_out`、`text_based`。模型密钥和本地 OCR 命令建议统一放在 `.env` 中，不建议通过公网 API 暴露服务器命令配置。
 
 ## 术语表格式
 

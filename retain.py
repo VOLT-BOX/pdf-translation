@@ -293,6 +293,15 @@ def resolve_glossary_entries(
 
 # ---------- spec 构造 ----------
 
+def _normalize_ocr_provider(value: str) -> str:
+    provider = str(value or "").strip().lower()
+    if provider in {"", "cloud", "remote", "paddle"}:
+        return "paddle"
+    if provider == "local":
+        return "local"
+    return provider
+
+
 def _build_spec(
     *,
     job_id: str,
@@ -310,6 +319,9 @@ def _build_spec(
     typst_font_family: str,
     pdf_compress_dpi: int,
     paddle_model: str,
+    paddle_api_url: str = "",
+    local_ocr_command: str = "",
+    local_ocr_raw_provider: str = "",
     glossary_entries: list[dict],
     custom_prompt: str = "",
     glossary_hard: bool = False,
@@ -338,16 +350,27 @@ def _build_spec(
     }
     if custom_prompt.strip():
         translation_block["custom_rules_text"] = custom_prompt.strip()
+    ocr_block: dict = {
+        "provider": provider,
+        "credential_ref": f"env:{OCR_TOKEN_ENV}",
+        "paddle_model": paddle_model,
+    }
+    if paddle_api_url.strip():
+        ocr_block["paddle_api_url"] = paddle_api_url.strip()
+    local_options: dict = {}
+    if local_ocr_command.strip():
+        local_options["command"] = local_ocr_command.strip()
+    if local_ocr_raw_provider.strip():
+        local_options["raw_provider"] = local_ocr_raw_provider.strip()
+    if local_options:
+        ocr_block["options"] = local_options
+
     return {
         "schema_version": "provider.stage.v1",
         "stage": "provider",
         "job": {"job_id": job_id, "job_root": str(job_root), "workflow": "book"},
         "source": {"file_url": "", "file_path": str(source_pdf_path)},
-        "ocr": {
-            "provider": provider,
-            "credential_ref": f"env:{OCR_TOKEN_ENV}",
-            "paddle_model": paddle_model,
-        },
+        "ocr": ocr_block,
         "translation": translation_block,
         "render": {
             "render_mode": render_mode,
@@ -574,13 +597,29 @@ def run_retain(
     result = RetainResult()
 
     # 凭证:请求体优先,缺则 config 兜底
+    requested_ocr_provider = (
+        (inputs.get("ocr_provider") or "").strip()
+        or settings.retain_ocr_provider.strip()
+        or "cloud"
+    )
+    ocr_provider = _normalize_ocr_provider(requested_ocr_provider)
     paddle_token = (inputs.get("paddle_token") or "").strip() or settings.paddle_token
+    paddle_api_url = (inputs.get("paddle_api_url") or "").strip() or settings.paddle_api_url
+    local_ocr_command = (inputs.get("local_ocr_command") or "").strip() or settings.local_ocr_command
+    local_ocr_raw_provider = (
+        (inputs.get("local_ocr_raw_provider") or "").strip()
+        or settings.local_ocr_raw_provider
+        or "paddle"
+    )
     api_key = (inputs.get("openai_api_key") or "").strip() or settings.llm_api_key
     model = (inputs.get("openai_model") or "").strip() or settings.llm_model
     base_url = (inputs.get("openai_base_url") or "").strip() or settings.llm_base_url
 
-    if not paddle_token:
+    if ocr_provider == "paddle" and not paddle_token:
         result.error = "paddle_token is required (or set RETAIN_PADDLE_TOKEN)"
+        return result
+    if ocr_provider == "local" and not local_ocr_command:
+        result.error = "local_ocr_command is required when ocr_provider is local (or set RETAIN_LOCAL_OCR_COMMAND)"
         return result
     if not api_key:
         result.error = "api_key is required (or set LLM_API_KEY)"
@@ -612,7 +651,7 @@ def run_retain(
     mode = inputs.get("mode") or settings.retain_mode
     spec = _build_spec(
         job_id=job_id, job_root=work_dir, source_pdf_path=source_pdf_path,
-        provider="paddle", model=model, base_url=base_url, mode=mode,
+        provider=ocr_provider, model=model, base_url=base_url, mode=mode,
         render_mode=settings.retain_render_mode,
         workers=int(inputs.get("concurrency") or 100),
         batch_size=1, math_mode=settings.retain_math_mode,
@@ -620,6 +659,9 @@ def run_retain(
         typst_font_family=settings.retain_typst_font_family,
         pdf_compress_dpi=settings.retain_pdf_compress_dpi,
         paddle_model=settings.retain_paddle_model,
+        paddle_api_url=paddle_api_url,
+        local_ocr_command=local_ocr_command,
+        local_ocr_raw_provider=local_ocr_raw_provider,
         glossary_entries=glossary_entries,
         custom_prompt=inputs.get("custom_system_prompt") or "",
         glossary_hard=bool(inputs.get("glossary_hard", False)),
@@ -632,9 +674,14 @@ def run_retain(
 
     # 子进程 env
     child_env = os.environ.copy()
-    child_env[OCR_TOKEN_ENV] = paddle_token
+    if paddle_token:
+        child_env[OCR_TOKEN_ENV] = paddle_token
     child_env[LLM_KEY_ENV] = api_key
     child_env["RETAIN_OCR_PROVIDER_CONFIG"] = settings.ocr_provider_config
+    if local_ocr_command:
+        child_env["RETAIN_LOCAL_OCR_COMMAND"] = local_ocr_command
+    if local_ocr_raw_provider:
+        child_env["RETAIN_OCR_RAW_PROVIDER"] = local_ocr_raw_provider
     child_env["OUTPUT_ROOT"] = str(settings.work_root)
     child_env["PYTHONUNBUFFERED"] = "1"
     if target_lang.strip():

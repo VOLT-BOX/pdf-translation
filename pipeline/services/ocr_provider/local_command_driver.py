@@ -11,6 +11,8 @@ from services.document_schema import DOCUMENT_SCHEMA_REPORT_FILE_NAME
 from services.document_schema import adapt_path_to_document_v1_with_report
 from services.document_schema import validate_saved_document_path
 from services.document_schema.providers import PROVIDER_GENERIC_FLAT_OCR
+from services.document_schema.providers import PROVIDER_PADDLE
+from services.ocr_provider.paddle_normalize import save_normalized_document_for_paddle
 from services.ocr_provider.types import OcrProviderResult
 from services.pipeline_shared.events import emit_stage_progress
 from services.pipeline_shared.io import save_json
@@ -143,6 +145,7 @@ def run_local_command_ocr_to_job_dir(args: SimpleNamespace) -> OcrProviderResult
             provider_result_json_path=provider_result_json_path,
             raw_provider=raw_provider,
             document_id=job_dirs.root.name,
+            source_pdf_path=source_pdf_path,
         )
 
     validation = validate_saved_document_path(normalized_json_path)
@@ -241,6 +244,7 @@ def _materialize_normalized_document_from_local_raw(
     provider_result_json_path: Path,
     raw_provider: str,
     document_id: str,
+    source_pdf_path: Path,
 ) -> None:
     source_json_path = raw_payload_json_path if raw_payload_json_path.exists() else provider_result_json_path
     if not source_json_path.exists():
@@ -249,6 +253,16 @@ def _materialize_normalized_document_from_local_raw(
             f"{normalized_json_path} / {raw_payload_json_path}"
         )
     provider = raw_provider or PROVIDER_GENERIC_FLAT_OCR
+    if provider == PROVIDER_PADDLE:
+        save_normalized_document_for_paddle(
+            provider_result_json_path=source_json_path,
+            source_pdf_path=source_pdf_path,
+            normalized_json_path=normalized_json_path,
+            normalized_report_json_path=normalized_report_json_path,
+            document_id=document_id,
+            provider_version="local",
+        )
+        return
     document, report = adapt_path_to_document_v1_with_report(
         source_json_path=source_json_path,
         document_id=document_id,

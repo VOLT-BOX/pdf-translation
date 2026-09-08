@@ -138,6 +138,13 @@ def _coerce_bbox(value: object) -> list[float] | None:
     return bbox
 
 
+def _entry_line_index(entry: dict, fallback_index: int) -> int:
+    try:
+        return int(entry.get("line_index"))
+    except (TypeError, ValueError):
+        return fallback_index
+
+
 def _split_translated_toc_line(line: str) -> tuple[str, str]:
     value = str(line or "").strip()
     if not value:
@@ -148,6 +155,37 @@ def _split_translated_toc_line(line: str) -> tuple[str, str]:
     title = str(match.group("title") or "").strip(" .\t")
     page_label = str(match.group("page") or "").strip()
     return title, page_label
+
+
+def _translated_line_for_entry(lines: list[str], entry: dict, fallback_index: int) -> str:
+    line_index = _entry_line_index(entry, fallback_index)
+    if line_index < 0 or line_index >= len(lines):
+        line_index = fallback_index
+    return lines[line_index] if 0 <= line_index < len(lines) else ""
+
+
+def _leading_toc_lines(item: dict, lines: list[str], entries: list[dict]) -> list[RenderTocEntry]:
+    entry_line_indexes = [
+        _entry_line_index(entry, index)
+        for index, entry in enumerate(entries)
+        if isinstance(entry, dict)
+    ]
+    if not entry_line_indexes:
+        return []
+    valid_line_indexes = [index for index in entry_line_indexes if index >= 0]
+    if not valid_line_indexes:
+        return []
+    first_entry_line_index = min(valid_line_indexes)
+    rendered: list[RenderTocEntry] = []
+    for line_index in range(min(first_entry_line_index, len(lines))):
+        bbox = _line_bbox(item, line_index)
+        if bbox is None:
+            continue
+        title, page_label = _split_translated_toc_line(lines[line_index])
+        if not title:
+            continue
+        rendered.append(RenderTocEntry(title=title, page_label=page_label, bbox=bbox, number="", level=1))
+    return rendered
 
 
 def _render_toc_entries_from_translated_lines(item: dict, translated_text: str) -> list[RenderTocEntry]:
@@ -176,7 +214,7 @@ def render_toc_entries_for_item(item: dict, translated_text: str) -> list[Render
     if not isinstance(entries, list) or not entries:
         return _render_toc_entries_from_translated_lines(item, translated_text)
     lines = _translated_lines_by_source_geometry(item, translated_text)
-    rendered: list[RenderTocEntry] = []
+    rendered: list[RenderTocEntry] = _leading_toc_lines(item, lines, entries)
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             continue
@@ -186,7 +224,7 @@ def render_toc_entries_for_item(item: dict, translated_text: str) -> list[Render
         source_title = str(entry.get("title") or "").strip()
         page_label = str(entry.get("page_label") or "").strip()
         number = str(entry.get("number") or "").strip()
-        translated_line = lines[index] if index < len(lines) else ""
+        translated_line = _translated_line_for_entry(lines, entry, index)
         title = _strip_toc_number(_strip_toc_page_label(translated_line, page_label), number) or source_title
         try:
             level = int(entry.get("level") or 1)

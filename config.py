@@ -30,6 +30,13 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _default_local_ocr_command() -> str:
+    docker_wrapper = Path("/app/local_ocr/paddlex_paddleocr.py")
+    if docker_wrapper.exists():
+        return f"{os.sys.executable} {docker_wrapper}"
+    return f'"{os.sys.executable}" "{_BASE / "local_ocr" / "paddlex_paddleocr.py"}"'
+
+
 class Settings:
     # ---- LLM(统一一套,v3 与 RetainPDF 共用)----
     # 请求体传的 openai_api_key/model/base_url 优先,缺则这里兜底。
@@ -37,8 +44,12 @@ class Settings:
     llm_model: str = _env("LLM_MODEL", "deepseek-v4-flash")
     llm_base_url: str = _env("LLM_BASE_URL", "https://api.deepseek.com/v1")
 
-    # ---- PaddleOCR(RetainPDF 用,远程云服务)----
+    # ---- OCR(RetainPDF 扫描页用)----
+    retain_ocr_provider: str = _env("RETAIN_OCR_PROVIDER", "cloud")
     paddle_token: str = os.getenv("RETAIN_PADDLE_TOKEN", "")
+    paddle_api_url: str = _env("RETAIN_PADDLE_API_URL", "")
+    local_ocr_command: str = _env("RETAIN_LOCAL_OCR_COMMAND", _default_local_ocr_command())
+    local_ocr_raw_provider: str = _env("RETAIN_OCR_RAW_PROVIDER", "paddle")
 
     # ---- v3(babeldoc)资源----
     # 允许重复翻译:禁用 babeldoc 的"已翻译"标记检查。

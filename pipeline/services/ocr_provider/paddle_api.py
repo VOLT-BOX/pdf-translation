@@ -164,7 +164,7 @@ def build_optional_payload(model: str) -> dict[str, Any]:
         "useLayoutDetection": True,
         "useChartRecognition": False,
         "useSealRecognition": True,
-        "useOcrForImageBlock": False,
+        "useOcrForImageBlock": True,
         "mergeTables": True,
         "relevelTitles": True,
         "layoutShapeMode": "auto",

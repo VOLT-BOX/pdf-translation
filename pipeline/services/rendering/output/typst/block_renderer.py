@@ -376,6 +376,19 @@ def _build_toc_entry_typst(block_id: str, block: RenderBlock, *, text_fill: str)
         body_name = f"{block_id.replace('-', '_')}_toc_{index}_body"
         title_y = round(max(0.0, height * 0.08), 2)
         leader_y = round(height * 0.55, 2)
+        if not page_label:
+            parts.extend(
+                [
+                    f'#let {title_name} = "{escape_typst_string(prefix_title)}"',
+                    f"#let {body_name} = block(width: {line_width}pt, height: {height}pt)[#{{ "
+                    f"set text(size: {max_font_pt}pt, weight: \"{font_weight}\", fill: {text_fill}); "
+                    "set par(leading: 0.15em, justify: false); "
+                    f"place(top + left, dx: 0pt, dy: {title_y}pt, box(width: {line_width}pt, clip: false)"
+                    f"[#{{ cmarker.render({title_name}, math: mitex) }}]) }}]",
+                    typst_place_context(x_pt=x0 + indent, y_pt=y0, body_name=body_name).rstrip(),
+                ]
+            )
+            continue
         parts.extend(
             [
                 f'#let {title_name} = "{escape_typst_string(prefix_title)}"',

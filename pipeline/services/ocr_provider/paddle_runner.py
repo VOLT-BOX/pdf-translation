@@ -17,6 +17,7 @@ from services.ocr_provider.paddle_api import normalize_model_name
 from services.ocr_provider.paddle_api import poll_until_done
 from services.ocr_provider.paddle_api import submit_local_file
 from services.ocr_provider.paddle_api import submit_remote_url
+from services.ocr_provider.paddle_image_reocr import augment_paddle_payload_with_image_reocr
 from services.ocr_provider.paddle_markdown import materialize_paddle_markdown_artifacts
 from services.ocr_provider.paddle_normalize import save_normalized_document_for_paddle
 from services.pipeline_shared.events import emit_stage_progress
@@ -184,6 +185,24 @@ def run_paddle_to_job_dir(
     if trace_id:
         meta["traceId"] = trace_id
     payload["_meta"] = meta
+    payload = augment_paddle_payload_with_image_reocr(
+        payload,
+        source_pdf_path=source_pdf_path,
+        work_dir=job_dirs.ocr_dir / "image_reocr",
+        ocr_crop=lambda crop_pdf_path, crop_index: _run_crop_ocr(
+            crop_pdf_path,
+            crop_index=crop_index,
+            token=paddle_token,
+            model=model_name,
+            optional_payload=optional_payload,
+            base_url=base_url,
+            submit_local=submit_local,
+            poll_until_complete=poll_until_complete,
+            download_jsonl=download_jsonl,
+            poll_interval=args.poll_interval,
+            poll_timeout=args.poll_timeout,
+        ),
+    )
     # The Paddle payload can embed base64 page images — write it compact.
     save_json_file(provider_result_json_path, payload, compact=True)
     markdown_path = materialize_markdown(payload=payload, job_root=job_dirs.root)
@@ -205,3 +224,39 @@ def run_paddle_to_job_dir(
     print(f"artifacts: {job_dirs.artifacts_dir}", flush=True)
     print(f"logs: {job_dirs.logs_dir}", flush=True)
     return job_dirs.root, source_pdf_path, provider_result_json_path, normalized_json_path
+
+
+def _run_crop_ocr(
+    crop_pdf_path: Path,
+    *,
+    crop_index: int,
+    token: str,
+    model: str,
+    optional_payload: dict,
+    base_url: str,
+    submit_local: SubmitLocalFn,
+    poll_until_complete: PollFn,
+    download_jsonl: DownloadJsonlFn,
+    poll_interval: int,
+    poll_timeout: int,
+) -> dict:
+    print(f"paddle image re-OCR crop {crop_index}: {crop_pdf_path}", flush=True)
+    crop_task_id, crop_trace_id = submit_local(
+        token=token,
+        file_path=crop_pdf_path,
+        model=model,
+        optional_payload=optional_payload,
+        base_url=base_url,
+    )
+    if crop_trace_id:
+        print(f"paddle image re-OCR trace_id: {crop_trace_id}", flush=True)
+    _, jsonl_url = _poll_until_complete_with_optional_progress(
+        poll_until_complete,
+        token=token,
+        job_id=crop_task_id,
+        poll_interval=poll_interval,
+        poll_timeout=poll_timeout,
+        base_url=base_url,
+        progress_callback=lambda _state, _payload: None,
+    )
+    return download_jsonl(jsonl_url=jsonl_url)

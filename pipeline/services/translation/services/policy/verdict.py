@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from services.translation.core.item_reader import is_forced_table_item
+from services.translation.core.item_reader import item_is_table_of_contents
 from services.translation.core.item_reader import item_is_caption_like
 from services.translation.core.item_reader import item_policy_translate
 from services.translation.core.item_reader import item_raw_block_type
@@ -158,6 +159,8 @@ def translation_policy_verdict(item: dict) -> TranslationPolicyVerdict:
     # 显式策略永远无法生效。注意:这里直接读 item 原始 policy_translate 字段,
     # 而非 view.policy_translate(后者会被 should_translate=False 污染成 False)。
     if _policy_bool(item.get("policy_translate")) is True or item_policy_translate(item) is True:
+        return TranslationPolicyVerdict(action=TRANSLATE_ACTION)
+    if item_is_table_of_contents(item):
         return TranslationPolicyVerdict(action=TRANSLATE_ACTION)
     # enable_table_translation 强制翻译的表格:直接放行。表格只在开关开启时才会进
     # payload,必须翻译。否则 policy_skip(policy.translate=False,provider_non_text:table)

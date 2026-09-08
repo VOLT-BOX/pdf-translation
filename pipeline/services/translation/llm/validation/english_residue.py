@@ -4,6 +4,7 @@ from difflib import SequenceMatcher
 import re
 
 from services.translation.core.item_reader import item_is_bodylike
+from services.translation.core.item_reader import item_is_table_of_contents
 from services.translation.core.item_reader import item_is_reference_like
 from services.translation.core.item_reader import item_normalized_sub_type
 from services.translation.core.item_reader import item_raw_block_type
@@ -291,6 +292,8 @@ def should_force_translate_body_text(item: dict) -> bool:
     source_text = unit_source_text(item).strip()
     if not source_text:
         return False
+    if item_is_table_of_contents(item):
+        return True
     if looks_like_code_literal_text_value(source_text):
         return False
     if looks_like_garbled_fragment(source_text):

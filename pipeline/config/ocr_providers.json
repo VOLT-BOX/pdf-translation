@@ -62,12 +62,12 @@
         "command": {
           "type": "string",
           "env": "RETAIN_LOCAL_OCR_COMMAND",
-          "default": ""
+          "default": "python /app/local_ocr/paddlex_paddleocr.py"
         },
         "raw_provider": {
           "type": "string",
           "env": "RETAIN_OCR_RAW_PROVIDER",
-          "default": "generic_flat_ocr"
+          "default": "paddle"
         }
       }
     }

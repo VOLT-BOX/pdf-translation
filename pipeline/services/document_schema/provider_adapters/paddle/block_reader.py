@@ -136,6 +136,11 @@ _VISION_FOOTNOTE_FALLBACK_RULE = PaddleTextRoleRule(
     translate=True,
     translate_reason="provider_footnote_whitelist:vision_footnote",
 )
+_IMAGE_TEXT_SUBTYPES = {"image_body"}
+
+
+def _has_translatable_text(text: str) -> bool:
+    return bool(str(text or "").strip())
 
 
 def _merge_role_rule(base: PaddleTextRoleRule, override: PaddleTextRoleRule | None) -> PaddleTextRoleRule:
@@ -150,8 +155,16 @@ def _merge_role_rule(base: PaddleTextRoleRule, override: PaddleTextRoleRule | No
     )
 
 
-def _paddle_text_role_rule(*, raw_label: str, block_type: str, sub_type: str) -> PaddleTextRoleRule:
+def _paddle_text_role_rule(*, raw_label: str, block_type: str, sub_type: str, text: str = "") -> PaddleTextRoleRule:
     if block_type != "text":
+        if block_type == "image" and sub_type in _IMAGE_TEXT_SUBTYPES and _has_translatable_text(text):
+            return PaddleTextRoleRule(
+                layout_role="paragraph",
+                semantic_role="body",
+                structure_role="body",
+                translate=True,
+                translate_reason=f"provider_image_text_whitelist:{sub_type}",
+            )
         return PaddleTextRoleRule(
             translate=False,
             translate_reason=f"provider_non_text:{block_type or 'unknown'}",
@@ -295,6 +308,7 @@ def build_block_spec(
         raw_label=block_context["raw_label"],
         block_type=block_type,
         sub_type=sub_type,
+        text=block_context["text"],
     )
     layout_role = role_rule.layout_role
     semantic_role = role_rule.semantic_role

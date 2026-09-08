@@ -54,7 +54,7 @@ def build_derived(raw_label: str, *, sub_type: str = "") -> dict:
 
 
 def build_metadata(block: dict, kind_metadata: dict) -> dict:
-    return {
+    metadata = {
         "raw_group_id": block.get("group_id"),
         "raw_global_block_id": block.get("global_block_id"),
         "raw_global_group_id": block.get("global_group_id"),
@@ -62,6 +62,10 @@ def build_metadata(block: dict, kind_metadata: dict) -> dict:
         "raw_polygon": normalize_polygon(block.get("block_polygon_points")),
         **kind_metadata,
     }
+    image_reocr = block.get("_image_reocr")
+    if isinstance(image_reocr, dict) and image_reocr:
+        metadata["image_reocr"] = dict(image_reocr)
+    return metadata
 
 
 def build_source(

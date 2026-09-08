@@ -47,6 +47,11 @@ def is_default_translatable_text_item(item: dict) -> bool:
 def foundational_skip_defaults(item: dict) -> tuple[str, str] | None:
     if item_is_algorithm_like(item):
         return "skip_algorithm", "skip_algorithm"
+    explicit_policy = item_policy_translate(item)
+    if explicit_policy is True:
+        return None
+    if explicit_policy is False:
+        return "policy_skip", "policy_skip"
     block_type = item_raw_block_type(item)
     normalized_block_type = block_type.strip().lower()
     if normalized_block_type in _FOUNDATIONAL_SKIP_BY_BLOCK_TYPE:

@@ -10,6 +10,8 @@ services:
     # .env 里改一项就生效,无需动 compose。容器内代码读这些 env(config.py)。
     env_file:
       - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/data
     restart: unless-stopped

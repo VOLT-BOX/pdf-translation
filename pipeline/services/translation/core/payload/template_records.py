@@ -59,6 +59,11 @@ def default_translation_flags(
     semantic_role = str(payload.get("semantic_role", (metadata or {}).get("semantic_role", "")) or "").strip().lower()
     if semantic_role == "reference":
         return "skip_reference_zone", False, "skip_reference_zone"
+    explicit_policy = item_policy_translate(payload)
+    if explicit_policy is True:
+        return "", True, ""
+    if explicit_policy is False:
+        return f"skip_{normalized_block_type or 'non_body_text'}", False, f"skip_{normalized_block_type or 'non_body_text'}"
     if normalized_block_type == "image":
         return "skip_image_body", False, "skip_image_body"
     if normalized_block_type == "table":

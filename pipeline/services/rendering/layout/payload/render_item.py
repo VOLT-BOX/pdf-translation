@@ -81,6 +81,13 @@ def should_render_source_block(item: dict) -> bool:
     return analysis.raw_math_count > 0 or analysis.latex_command_count > 0
 
 
+def _is_unpositioned_image_text_item(item: dict) -> bool:
+    block_kind = str(item.get("block_kind", item.get("block_type", "")) or "").strip().lower()
+    sub_type = str(item.get("normalized_sub_type", "") or "").strip().lower()
+    raw_block_type = str(item.get("raw_block_type", "") or "").strip().lower()
+    return block_kind == "image" and sub_type == "image_body" and raw_block_type in {"", "image"}
+
+
 def _skip_reason(item: dict) -> str:
     return str(item.get("skip_reason", "") or item.get("classification_label", "") or "").strip().lower()
 
@@ -108,6 +115,11 @@ def render_protected_source_text(item: dict) -> str:
 
 
 def seed_render_fields(item: dict) -> None:
+    if _is_unpositioned_image_text_item(item):
+        clear_render_fields(item)
+        item["render_source_text"] = render_protected_source_text(item)
+        item["_render_skip_reason"] = "unpositioned_image_text"
+        return
     if should_skip_display_math_render(item):
         clear_render_fields(item)
         item["render_source_text"] = render_protected_source_text(item)

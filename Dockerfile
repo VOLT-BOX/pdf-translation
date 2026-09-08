@@ -87,6 +87,7 @@ COPY babeldoc/ ./babeldoc/
 COPY app.py orchestrate.py classify.py merge.py config.py store.py \
      v3_worker.py v3_models.py retain.py normalize.py run_job.py image_translate.py ./
 COPY pipeline ./pipeline
+COPY local_ocr ./local_ocr
 COPY requirements.txt ./requirements.txt
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

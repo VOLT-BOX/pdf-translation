@@ -80,6 +80,14 @@ def item_normalized_sub_type(item: dict | None) -> str:
     return _first_non_empty_str(source.get("normalized_sub_type")).lower()
 
 
+def item_is_table_of_contents(item: dict | None) -> bool:
+    return "table_of_contents" in {
+        item_semantic_role(item),
+        item_structure_role(item),
+        item_normalized_sub_type(item),
+    }
+
+
 def item_effective_role(item: dict | None) -> str:
     return _first_non_empty_str(
         item_layout_role(item),
@@ -164,6 +172,7 @@ __all__ = [
     "item_is_plain_text_block",
     "item_is_reference_heading_like",
     "item_is_reference_like",
+    "item_is_table_of_contents",
     "item_is_textual",
     "item_is_title_like",
     "item_layout_role",

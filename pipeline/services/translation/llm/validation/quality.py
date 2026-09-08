@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from services.translation.core.item_reader import is_forced_table_item
+from services.translation.core.item_reader import item_is_table_of_contents
 from services.translation.core.item_reader import item_raw_block_type
 from services.translation.artifacts.status import is_allowed_untranslated
 from services.translation.llm.result_payload import KEEP_ORIGIN_LABEL
@@ -84,6 +85,8 @@ def should_reject_keep_origin(item: dict, decision: str, payload: dict[str, str]
     # 不再让表格保持原文。放在 block_type 判定之前,因为表格 raw_block_type=table
     # 原本会在这里被短路放过。
     if is_forced_table_item(item):
+        return True
+    if item_is_table_of_contents(item):
         return True
     block_type = item_raw_block_type(item)
     if block_type not in {"", "text"}:
