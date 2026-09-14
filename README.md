@@ -164,6 +164,19 @@ RETAIN_PADDLE_IMAGE_REOCR=0
 RETAIN_PADDLE_IMAGE_REOCR_MAX_BLOCKS=6
 ```
 
+创建任务时也可以用 `image_reocr` 临时覆盖服务端默认值：
+
+```bash
+curl -X POST http://localhost:8040/tasks \
+  -F "file=@example.pdf" \
+  -F "lang_in=es" \
+  -F "lang_out=zh" \
+  -F "text_based=false" \
+  -F "image_reocr=false"
+```
+
+如果二次 OCR 识别出来的文字已经明显是目标语言，例如目标语言是中文且截图里本来就是中文，系统会保留原图片块，不再把该图片拆成文本块参与翻译和重新覆盖渲染。
+
 兼容说明：旧参数值 `paddle` 等同于 `cloud`，但新部署建议统一使用 `cloud/local`。
 
 ### 对比 OCR 结构化结果
@@ -460,6 +473,7 @@ curl -X POST http://localhost:8040/normalize \
 | `glossary_hard` | `false` | 对命中的术语启用占位符硬约束；只作用于成功匹配的 source。 |
 | `callback_url` | 空 | 任务完成后的回调地址。 |
 | `enable_table_translation` | `false` | 是否翻译表格内容。 |
+| `image_reocr` | 空 | 是否对图片块做二次 OCR。为空时使用 `.env` 的 `RETAIN_PADDLE_IMAGE_REOCR`；传 `true/false` 可按任务覆盖。 |
 
 通常只需要传 `file`、`lang_in`、`lang_out`、`text_based`。模型密钥和本地 OCR 命令建议统一放在 `.env` 中，不建议通过公网 API 暴露服务器命令配置。
 

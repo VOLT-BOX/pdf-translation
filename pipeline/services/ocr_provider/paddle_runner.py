@@ -189,6 +189,8 @@ def run_paddle_to_job_dir(
         payload,
         source_pdf_path=source_pdf_path,
         work_dir=job_dirs.ocr_dir / "image_reocr",
+        enabled=_optional_bool(getattr(args, "image_reocr", None)),
+        target_lang=str(getattr(args, "target_lang", "") or ""),
         ocr_crop=lambda crop_pdf_path, crop_index: _run_crop_ocr(
             crop_pdf_path,
             crop_index=crop_index,
@@ -224,6 +226,19 @@ def run_paddle_to_job_dir(
     print(f"artifacts: {job_dirs.artifacts_dir}", flush=True)
     print(f"logs: {job_dirs.logs_dir}", flush=True)
     return job_dirs.root, source_pdf_path, provider_result_json_path, normalized_json_path
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
 
 
 def _run_crop_ocr(

@@ -302,6 +302,19 @@ def _normalize_ocr_provider(value: str) -> str:
     return provider
 
 
+def _optional_bool(value: object) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def _build_spec(
     *,
     job_id: str,
@@ -326,6 +339,7 @@ def _build_spec(
     custom_prompt: str = "",
     glossary_hard: bool = False,
     enable_table_translation: bool = False,
+    image_reocr: bool | None = None,
     target_lang: str = "",
     target_language_name: str = "",
 ) -> dict:
@@ -364,6 +378,9 @@ def _build_spec(
         local_options["raw_provider"] = local_ocr_raw_provider.strip()
     if local_options:
         ocr_block["options"] = local_options
+    if image_reocr is not None:
+        ocr_block.setdefault("options", {})
+        ocr_block["options"]["image_reocr"] = bool(image_reocr)
 
     return {
         "schema_version": "provider.stage.v1",
@@ -589,7 +606,7 @@ def run_retain(
     """跑 RetainPDF 流水线(subprocess),返回产物。
 
     inputs 字段:lang_in/lang_out/concurrency/openai_api_key/openai_model/openai_base_url/
-                 paddle_token/mode/glossary_hard/custom_system_prompt/enable_table_translation
+                 paddle_token/mode/glossary_hard/custom_system_prompt/enable_table_translation/image_reocr
     work_dir:RetainPDF job 目录(产物写 rendered/)
     """
     import fitz  # noqa: F401  (确保 PyMuPDF 可用)
@@ -666,6 +683,7 @@ def run_retain(
         custom_prompt=inputs.get("custom_system_prompt") or "",
         glossary_hard=bool(inputs.get("glossary_hard", False)),
         enable_table_translation=bool(inputs.get("enable_table_translation", False)),
+        image_reocr=_optional_bool(inputs.get("image_reocr")),
         target_lang=target_lang,
         target_language_name=target_language_name,
     )

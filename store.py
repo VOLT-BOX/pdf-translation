@@ -243,6 +243,7 @@ class TaskStore:
             "glossary_hard": inputs.get("glossary_hard", False),
             "text_based": inputs.get("text_based", False),
             "enable_table_translation": inputs.get("enable_table_translation", False),
+            "image_reocr": inputs.get("image_reocr"),
             "has_glossary": bool(t.get("glossary_path")),
         }
 

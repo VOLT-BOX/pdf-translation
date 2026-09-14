@@ -28,6 +28,7 @@ _SECONDARY_TEXT_LABEL_REMAP = {
     "aside_text": "text",
     "vision_footnote": "text",
 }
+_DISTINCTIVE_TARGET_LANGS = {"zh", "ja", "ko", "ru", "ar", "th", "vi"}
 
 
 def paddle_image_reocr_enabled() -> bool:
@@ -42,6 +43,7 @@ def augment_paddle_payload_with_image_reocr(
     work_dir: Path,
     ocr_crop: OcrCropFn,
     enabled: bool | None = None,
+    target_lang: str = "",
 ) -> dict[str, Any]:
     if enabled is None:
         enabled = paddle_image_reocr_enabled()
@@ -59,6 +61,7 @@ def augment_paddle_payload_with_image_reocr(
     rescued_count = 0
     replaced_count = 0
     attempted_count = 0
+    target_language_skipped_count = 0
     work_dir.mkdir(parents=True, exist_ok=True)
 
     with fitz.open(source_pdf_path) as pdf:
@@ -119,6 +122,22 @@ def augment_paddle_payload_with_image_reocr(
                         patched["_image_reocr"].update({"attempted": True, "error": str(exc)[:500]})
                     patched_blocks.append(patched)
                     continue
+                if _blocks_look_like_target_language(rescued_blocks, target_lang):
+                    patched = deepcopy(block)
+                    patched.setdefault("_image_reocr", {})
+                    if isinstance(patched["_image_reocr"], dict):
+                        patched["_image_reocr"].update(
+                            {
+                                "attempted": True,
+                                "applied": False,
+                                "secondary_blocks": len(rescued_blocks),
+                                "skip_reason": "secondary_text_already_target_language",
+                                "target_lang": _normalize_lang_main(target_lang),
+                            }
+                        )
+                    patched_blocks.append(patched)
+                    target_language_skipped_count += 1
+                    continue
                 if _should_replace_parent_image_block(rescued_blocks):
                     for rescued in rescued_blocks:
                         rescued.setdefault("_image_reocr", {})
@@ -160,6 +179,7 @@ def augment_paddle_payload_with_image_reocr(
             "attemptedBlocks": attempted_count,
             "replacedBlocks": replaced_count,
             "rescuedBlocks": rescued_count,
+            "targetLanguageSkippedBlocks": target_language_skipped_count,
             "maxBlocks": max_blocks,
         }
     return result
@@ -300,6 +320,92 @@ def _is_secondary_text_noise(label: str, text: str) -> bool:
         return False
     compact = re.sub(r"\s+", "", text)
     return len(compact) <= 1
+
+
+def _blocks_look_like_target_language(blocks: list[dict[str, Any]], target_lang: str) -> bool:
+    lang = _normalize_lang_main(target_lang)
+    if lang not in _DISTINCTIVE_TARGET_LANGS:
+        return False
+    text = _joined_block_text(blocks)
+    if len(_visible_text_chars(text)) < 2:
+        return False
+    stats = _script_stats(text)
+    total_letters = max(1, stats["letters"])
+    if lang == "zh":
+        return stats["han"] >= 2 and stats["han"] / total_letters >= 0.35
+    if lang == "ja":
+        return (stats["kana"] >= 1 and (stats["kana"] + stats["han"]) / total_letters >= 0.25) or (
+            stats["han"] >= 2 and stats["han"] / total_letters >= 0.45
+        )
+    if lang == "ko":
+        return stats["hangul"] >= 2 and stats["hangul"] / total_letters >= 0.35
+    if lang == "ru":
+        return stats["cyrillic"] >= 2 and stats["cyrillic"] / total_letters >= 0.35
+    if lang == "ar":
+        return stats["arabic"] >= 2 and stats["arabic"] / total_letters >= 0.35
+    if lang == "th":
+        return stats["thai"] >= 2 and stats["thai"] / total_letters >= 0.35
+    if lang == "vi":
+        return stats["vietnamese"] >= 2 and stats["latin"] / total_letters >= 0.5
+    return False
+
+
+def _joined_block_text(blocks: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        label = str(block.get("block_label", "") or "").strip().lower()
+        if label in _SECONDARY_SKIP_LABELS:
+            continue
+        text = str(block.get("block_content", "") or "")
+        text = re.sub(r"<[^>]+>", " ", text)
+        if text.strip():
+            chunks.append(text)
+    return "\n".join(chunks)
+
+
+def _normalize_lang_main(value: str) -> str:
+    return str(value or "").strip().lower().replace("_", "-").split("-", 1)[0]
+
+
+def _visible_text_chars(text: str) -> str:
+    return "".join(ch for ch in str(text or "") if ch.isalpha() or "\u4e00" <= ch <= "\u9fff")
+
+
+def _script_stats(text: str) -> dict[str, int]:
+    stats = {
+        "letters": 0,
+        "han": 0,
+        "kana": 0,
+        "hangul": 0,
+        "cyrillic": 0,
+        "arabic": 0,
+        "thai": 0,
+        "latin": 0,
+        "vietnamese": 0,
+    }
+    for ch in str(text or ""):
+        code = ord(ch)
+        if ch.isalpha() or 0x4E00 <= code <= 0x9FFF:
+            stats["letters"] += 1
+        if 0x4E00 <= code <= 0x9FFF:
+            stats["han"] += 1
+        elif 0x3040 <= code <= 0x30FF:
+            stats["kana"] += 1
+        elif 0xAC00 <= code <= 0xD7AF:
+            stats["hangul"] += 1
+        elif 0x0400 <= code <= 0x04FF:
+            stats["cyrillic"] += 1
+        elif 0x0600 <= code <= 0x06FF or 0x0750 <= code <= 0x077F:
+            stats["arabic"] += 1
+        elif 0x0E00 <= code <= 0x0E7F:
+            stats["thai"] += 1
+        elif ("A" <= ch <= "Z") or ("a" <= ch <= "z") or 0x00C0 <= code <= 0x024F:
+            stats["latin"] += 1
+            if ch in "ăâđêôơưĂÂĐÊÔƠƯáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵÁÀẢÃẠẮẰẲẴẶẤẦẨẪẬÉÈẺẼẸẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌỐỒỔỖỘỚỜỞỠỢÚÙỦŨỤỨỪỬỮỰÝỲỶỸỴ":
+                stats["vietnamese"] += 1
+    return stats
 
 
 def _should_replace_parent_image_block(blocks: list[dict[str, Any]]) -> bool:

@@ -117,6 +117,7 @@ def _build_image_inputs(
     mode: str,
     custom_system_prompt: str | None,
     enable_table_translation: bool,
+    image_reocr: bool | None = None,
 ) -> dict:
     """图片翻译提交参数。"""
     return {
@@ -131,6 +132,7 @@ def _build_image_inputs(
         "mode": mode,
         "custom_system_prompt": custom_system_prompt,
         "enable_table_translation": enable_table_translation,
+        "image_reocr": image_reocr,
     }
 
 
@@ -148,6 +150,7 @@ async def translate_image_async(
     mode: str = Form("fast", description="RetainPDF 翻译模式:fast/precise/sci"),
     custom_system_prompt: str | None = Form(None),
     enable_table_translation: bool = Form(False),
+    image_reocr: bool | None = Form(None, description="是否开启图片块二次 OCR; 为空时使用服务端环境变量默认值"),
 ) -> JSONResponse:
     """图片翻译:先提交、后下载。
 
@@ -173,7 +176,7 @@ async def translate_image_async(
     inputs = _build_image_inputs(
         lang_in, lang_out, openai_api_key, openai_model, openai_base_url,
         paddle_token, ocr_provider, paddle_api_url,
-        mode, custom_system_prompt, enable_table_translation,
+        mode, custom_system_prompt, enable_table_translation, image_reocr,
     )
     task = {
         "task_id": task_id,
@@ -244,6 +247,7 @@ async def create_task(
     callback_url: str | None = Form(None),
     text_based: bool = Form(False, description="文本型 PDF(有文字层)填 true 复用文字层直译;扫描件/图片型 PDF 填 false 走 OCR"),
     enable_table_translation: bool = Form(False, description="RetainPDF 扫描页:是否翻译表格(默认 False=跳过表格)"),
+    image_reocr: bool | None = Form(None, description="是否开启图片块二次 OCR; 为空时使用服务端环境变量默认值"),
 ) -> JSONResponse:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "只接受 .pdf 文件")
@@ -290,6 +294,7 @@ async def create_task(
         "custom_system_prompt": custom_system_prompt,
         "text_based": text_based,
         "enable_table_translation": enable_table_translation,
+        "image_reocr": image_reocr,
     }
 
     task = {

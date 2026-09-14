@@ -431,6 +431,8 @@ class ProviderStageTranslationParams:
     model: str
     base_url: str
     credential_ref: str
+    target_lang: str
+    target_language_name: str
 
 
 @dataclass(frozen=True)
@@ -536,6 +538,8 @@ class ProviderStageSpec:
             model=str(translation_payload.get("model", "") or ""),
             base_url=str(translation_payload.get("base_url", "") or ""),
             credential_ref=str(translation_payload.get("credential_ref", "") or ""),
+            target_lang=str(translation_payload.get("target_lang", "") or ""),
+            target_language_name=str(translation_payload.get("target_language_name", "") or ""),
         )
         render = ProviderStageRenderParams(
             render_mode=str(render_payload.get("render_mode", "typst") or "typst"),
